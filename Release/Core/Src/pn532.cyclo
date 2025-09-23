@@ -1,0 +1,15 @@
+../Core/Src/pn532.c:100:16:PN532_GetFirmwareVersion	10
+../Core/Src/pn532.c:149:16:PN532_ConfigureSAM	3
+../Core/Src/pn532.c:36:16:PN532_Init	5
+../Core/Src/pn532.c:191:16:PN532_ReadPassiveTarget	6
+../Core/Src/pn532.c:181:16:PN532_ReadCard	2
+../Core/Src/pn532.c:244:6:PN532_IsCardPresent	3
+../Core/Src/pn532.c:259:10:PN532_GetCardUID	2
+../Core/Src/pn532.c:268:9:PN532_GetCardType	2
+../Core/Src/pn532.c:277:16:PN532_GetStatus	2
+../Core/Src/pn532.c:286:9:PN532_GetErrorCode	2
+../Core/Src/pn532.c:295:16:PN532_WriteCommand	7
+../Core/Src/pn532.c:77:16:PN532_SetMode	2
+../Core/Src/pn532.c:389:16:PN532_WaitReady	5
+../Core/Src/pn532.c:344:16:PN532_ReadResponse	12
+../Core/Src/pn532.c:411:9:PN532_CalculateChecksum	2
