@@ -32,7 +32,7 @@ extern "C" {
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "pn532.h"
-#include "bno055_stm32.h"
+#include "bno055.h"
 #include "modbus_slave.h"
 #include "modbus_regs.h"
 #include <stdio.h>

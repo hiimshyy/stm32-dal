@@ -219,9 +219,6 @@ int main(void)
   nfcTaskHandle = osThreadNew(StartNfcTask, NULL, &nfcTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
-  /* Create additional threads */
-  sensorTaskHandle = osThreadNew(StartSensorTask, NULL, &sensorTask_attributes);
-  nfcTaskHandle = osThreadNew(StartNfcTask, NULL, &nfcTask_attributes);
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -430,9 +427,6 @@ void SystemInit_Modules(void)
     system_status = 0x00;
     system_error = 0x00;
     
-    // Add delay for I2C stabilization
-    HAL_Delay(100);
-    
     // Scan I2C bus for devices
     DebugPrint("Scanning I2C bus...\r\n");
     I2C_Scanner();
@@ -508,125 +502,6 @@ void SystemInit_Modules(void)
 }
 
 /**
- * @brief Update sensor data from BNO055
- */
-void UpdateSensorData(void)
-{
-    if (!sensors_initialized) return;
-    
-    // Read all sensor data from BNO055
-    if (BNO055_ReadAllSensors(&hbno055) == BNO055_STATUS_OK) {
-        BNO055_Vector_t *accel = BNO055_GetAccel(&hbno055);
-        BNO055_Vector_t *gyro = BNO055_GetGyro(&hbno055);
-        BNO055_Vector_t *mag = BNO055_GetMag(&hbno055);
-        
-        // Update Modbus registers
-        Modbus_SetRegisterValue(&hmodbus, REG_ACCEL_X, (uint16_t)accel->x);
-        Modbus_SetRegisterValue(&hmodbus, REG_ACCEL_Y, (uint16_t)accel->y);
-        Modbus_SetRegisterValue(&hmodbus, REG_ACCEL_Z, (uint16_t)accel->z);
-        
-        Modbus_SetRegisterValue(&hmodbus, REG_GYRO_X, (uint16_t)gyro->x);
-        Modbus_SetRegisterValue(&hmodbus, REG_GYRO_Y, (uint16_t)gyro->y);
-        Modbus_SetRegisterValue(&hmodbus, REG_GYRO_Z, (uint16_t)gyro->z);
-        
-        Modbus_SetRegisterValue(&hmodbus, REG_MAG_X, (uint16_t)mag->x);
-        Modbus_SetRegisterValue(&hmodbus, REG_MAG_Y, (uint16_t)mag->y);
-        Modbus_SetRegisterValue(&hmodbus, REG_MAG_Z, (uint16_t)mag->z);
-        
-        // Update IMU status
-        BNO055_CalibStatus_t *calib = BNO055_GetCalibStatus(&hbno055);
-        uint16_t imu_status = (calib->system << 6) | (calib->gyro << 4) | 
-                             (calib->accel << 2) | calib->mag;
-        Modbus_SetRegisterValue(&hmodbus, REG_IMU_STATUS, imu_status);
-        
-        // Update error status
-        uint8_t error_code = BNO055_GetErrorCode(&hbno055);
-        Modbus_SetRegisterValue(&hmodbus, REG_IMU_ERROR, error_code);
-        
-    } else {
-        system_error |= 0x01; // IMU communication error
-        Modbus_SetRegisterValue(&hmodbus, REG_IMU_ERROR, 0x01);
-    }
-}
-
-/**
- * @brief Update NFC/RFID data from PN532
- */
-void UpdateNFCData(void)
-{
-    if (!sensors_initialized) return;
-    
-    // Try to read card/tag
-    PN532_Status_t status = PN532_ReadCard(&hpn532);
-    
-    if (status == PN532_STATUS_OK && PN532_IsCardPresent(&hpn532)) {
-        // Card detected
-        uint8_t *uid = PN532_GetCardUID(&hpn532);
-        uint8_t card_type = PN532_GetCardType(&hpn532);
-        
-        // Update Modbus registers
-        // Store first 4 bytes of UID as two 16-bit registers
-        uint16_t uid_low = (uid[1] << 8) | uid[0];
-        uint16_t uid_high = (uid[3] << 8) | uid[2];
-        
-        Modbus_SetRegisterValue(&hmodbus, REG_PN532_DATA_LOW, uid_low);
-        Modbus_SetRegisterValue(&hmodbus, REG_PN532_DATA_HIGH, uid_high);
-        Modbus_SetRegisterValue(&hmodbus, REG_PN532_CARD_TYPE, card_type);
-        Modbus_SetRegisterValue(&hmodbus, REG_PN532_STATUS, 0x01); // Card present
-        Modbus_SetRegisterValue(&hmodbus, REG_PN532_ERROR, 0x00); // No error
-        
-        // Store full UID in card UID register (first 2 bytes)
-        Modbus_SetRegisterValue(&hmodbus, REG_PN532_CARD_UID, uid_low);
-        
-    } else if (status == PN532_STATUS_NO_CARD) {
-        // No card detected
-        Modbus_SetRegisterValue(&hmodbus, REG_PN532_DATA_LOW, 0x0000);
-        Modbus_SetRegisterValue(&hmodbus, REG_PN532_DATA_HIGH, 0x0000);
-        Modbus_SetRegisterValue(&hmodbus, REG_PN532_CARD_TYPE, 0x00);
-        Modbus_SetRegisterValue(&hmodbus, REG_PN532_STATUS, 0x00); // No card
-        Modbus_SetRegisterValue(&hmodbus, REG_PN532_ERROR, 0x00); // No error
-        Modbus_SetRegisterValue(&hmodbus, REG_PN532_CARD_UID, 0x0000);
-        
-    } else {
-        // Communication error
-        system_error |= 0x02; // NFC communication error
-        uint8_t error_code = PN532_GetErrorCode(&hpn532);
-        Modbus_SetRegisterValue(&hmodbus, REG_PN532_STATUS, 0x00); // No card
-        Modbus_SetRegisterValue(&hmodbus, REG_PN532_ERROR, error_code);
-    }
-}
-
-/**
- * @brief Process Modbus communication
- */
-void ProcessModbusCommands(void)
-{
-    if (!sensors_initialized) return;
-    
-    // Update system registers
-    Modbus_SetRegisterValue(&hmodbus, REG_SYSTEM_STATUS, system_status);
-    Modbus_SetRegisterValue(&hmodbus, REG_SYSTEM_ERROR, system_error);
-    
-    // Process Modbus communication
-    Modbus_Process(&hmodbus);
-    
-    // Handle special commands
-    uint16_t reset_cmd;
-    if (Modbus_GetRegisterValue(&hmodbus, REG_RESET_ERROR_CMD, &reset_cmd) == MODBUS_STATUS_OK) {
-        if (reset_cmd == 0x0001) {
-            // Reset all error flags
-            system_error = 0;
-            Modbus_SetRegisterValue(&hmodbus, REG_IMU_ERROR, 0);
-            Modbus_SetRegisterValue(&hmodbus, REG_PN532_ERROR, 0);
-            Modbus_SetRegisterValue(&hmodbus, REG_SYSTEM_ERROR, 0);
-            Modbus_SetRegisterValue(&hmodbus, REG_RESET_ERROR_CMD, 0); // Clear command
-            
-            DebugPrint("Error flags reset\r\n");
-        }
-    }
-}
-
-/**
  * @brief Debug print function
  */
 void DebugPrint(const char* format, ...)
@@ -671,19 +546,6 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
         // Signal system error
         osEventFlagsSet(systemEventsHandle, EVENT_SYSTEM_ERROR);
     }
-}
-
-/**
- * @brief Debug hex dump function
- */
-void DebugDumpHex(const char* label, uint8_t* data, uint8_t len)
-{
-    DebugPrint("%s: ", label);
-    for (uint8_t i = 0; i < len; i++) {
-        DebugPrint("%02X ", data[i]);
-        if ((i + 1) % 16 == 0) DebugPrint("\r\n");
-    }
-    if (len % 16 != 0) DebugPrint("\r\n");
 }
 
 /**
@@ -768,12 +630,6 @@ void I2C_Scanner(void)
 void StartDefaultTask(void *argument)
 {
   /* USER CODE BEGIN 5 */
-  // Initialize modules
-  SystemInit_Modules();
-  
-  DebugPrint("DAL Module Started (RTOS)\r\n");
-  DebugPrint("Firmware Version: v1.01\r\n");
-  DebugPrint("Hardware Version: v1.01\r\n");
   
   // Signal that initialization is complete
   osEventFlagsSet(systemEventsHandle, EVENT_SENSOR_DATA_READY);
