@@ -13,7 +13,7 @@
 #include <stdbool.h>
 
 // PN532 I2C Address
-#define PN532_I2C_ADDRESS           0x24
+#define PN532_I2C_ADDRESS           (0x48 >> 1)
 
 // PN532 Commands
 #define PN532_COMMAND_GETFIRMWAREVERSION    0x02

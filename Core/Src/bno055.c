@@ -24,7 +24,6 @@
      hbno055->initialized = false;
      hbno055->status = BNO055_STATUS_OK;
      hbno055->error_code = 0;
-     hbno055->operation_mode = BNO055_OPERATION_MODE_CONFIG;
      
      // Clear sensor data
      memset(&hbno055->accel, 0, sizeof(BNO055_Vector_t));
@@ -64,18 +63,8 @@
          return BNO055_STATUS_ERROR;
      }
      
-     // Set to config mode
-     if (BNO055_SetOperationMode(hbno055, BNO055_OPERATION_MODE_CONFIG) != BNO055_STATUS_OK) {
-         return BNO055_STATUS_ERROR;
-     }
-     
-     // Reset system
-     if (BNO055_WriteRegister(hbno055, BNO055_SYS_TRIGGER_ADDR, 0x20) != BNO055_STATUS_OK) {
-         return BNO055_STATUS_ERROR;
-     }
-     
-     // Wait for reset
-     HAL_Delay(650);
+//      Wait for reset
+      HAL_Delay(650);
      
      // Wait for chip to be ready
      uint8_t sys_stat, sys_err;

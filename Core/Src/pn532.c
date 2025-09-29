@@ -40,32 +40,42 @@ PN532_Status_t PN532_Init(PN532_Handle_t *hpn532, I2C_HandleTypeDef *hi2c)
     // Initialize handle
     hpn532->hi2c = hi2c;
     hpn532->mode = PN532_MODE_NFC;
-    hpn532->read_timeout = 1000; // 1 second default
+    hpn532->read_timeout = 1000;
     hpn532->status = PN532_STATUS_OK;
     hpn532->error_code = 0;
     
-    // Clear card info
     memset(&hpn532->card_info, 0, sizeof(PN532_CardInfo_t));
     
-    // Add delay for PN532 to be ready (Adafruit approach)
+    // Delay lâu hơn cho PN532 khởi động
+    HAL_Delay(500);
+    
+    // Thử wake-up sequence
+    uint8_t wakeup_cmd[] = {0x55, 0x55, 0x00, 0x00, 0x00, 0x00, 0x00};
+    HAL_I2C_Master_Transmit(hpn532->hi2c, PN532_I2C_ADDRESS << 1, wakeup_cmd, 7, 100);
     HAL_Delay(100);
     
-    // Test communication with simple approach
+    // Kiểm tra firmware version với retry
     uint32_t version;
-    PN532_Status_t fw_status = PN532_GetFirmwareVersion(hpn532, &version);
+    PN532_Status_t fw_status;
+    
+    for (int i = 0; i < 3; i++) {
+        fw_status = PN532_GetFirmwareVersion(hpn532, &version);
+        if (fw_status == PN532_STATUS_OK) {
+            break;
+        }
+        HAL_Delay(200);
+    }
+    
     if (fw_status != PN532_STATUS_OK) {
         hpn532->status = PN532_STATUS_COMM_ERROR;
-        hpn532->error_code = 1; // Firmware version read failed
+        hpn532->error_code = 1;
         return PN532_STATUS_COMM_ERROR;
     }
     
-    // Configure SAM (Normal mode, timeout 50ms*20=1sec, use IRQ)
-    PN532_Status_t sam_status = PN532_ConfigureSAM(hpn532);
-    if (sam_status != PN532_STATUS_OK) {
-        hpn532->status = PN532_STATUS_ERROR;
-        hpn532->error_code = 2; // SAM configuration failed
-        return PN532_STATUS_ERROR;
-    }
+    // SAM configuration đơn giản hóa
+    uint8_t sam_cmd[] = {PN532_COMMAND_SAMCONFIGURATION, 0x01, 0x00, 0x01};
+    HAL_I2C_Master_Transmit(hpn532->hi2c, PN532_I2C_ADDRESS << 1, sam_cmd, 4, 100);
+    HAL_Delay(100);
     
     hpn532->status = PN532_STATUS_OK;
     return PN532_STATUS_OK;
@@ -101,43 +111,28 @@ PN532_Status_t PN532_GetFirmwareVersion(PN532_Handle_t *hpn532, uint32_t *versio
 {
     if (!hpn532 || !version) return PN532_STATUS_ERROR;
     
-    // Try different PN532 wake-up sequences
-    uint8_t wake_up[] = {0x55, 0x55, 0x00, 0x00, 0x00, 0x00}; // Wake up sequence
-    HAL_I2C_Master_Transmit(hpn532->hi2c, PN532_I2C_ADDRESS << 1, wake_up, 6, 100);
-    HAL_Delay(100);
-    
-    // Simple I2C read approach like Adafruit  
+    // Approach đơn giản - direct command/response
     uint8_t cmd = PN532_COMMAND_GETFIRMWAREVERSION;
-    uint8_t response[12];
+    uint8_t response[8];
     
-    // Write command
-    HAL_StatusTypeDef tx_result = HAL_I2C_Master_Transmit(hpn532->hi2c, PN532_I2C_ADDRESS << 1, &cmd, 1, 200);
-    if (tx_result != HAL_OK) {
-        return PN532_STATUS_COMM_ERROR;
-    }
-    
-    // Wait for response
-    HAL_Delay(100);
-    
-    // Read response
-    HAL_StatusTypeDef rx_result = HAL_I2C_Master_Receive(hpn532->hi2c, PN532_I2C_ADDRESS << 1, response, 12, 200);
-    if (rx_result != HAL_OK) {
-        return PN532_STATUS_COMM_ERROR;
-    }
-    
-    // Debug: Print response data
-    // Note: In production, remove this debug print to avoid external dependencies
-    // DebugDumpHex("PN532 Response", response, 12);
-    
-    // More flexible response parsing
-    for (int i = 0; i < 9; i++) {
-        if (response[i] == 0x00 && response[i+1] == 0x00 && response[i+2] == 0xFF) {
-            // Found valid frame header
-            if (i + 5 < 12) {
-                *version = (response[i+3] << 24) | (response[i+4] << 16) | (response[i+5] << 8);
-                return PN532_STATUS_OK;
+    // Thử nhiều lần với các approach khác nhau
+    for (int attempt = 0; attempt < 3; attempt++) {
+        // Approach 1: Gửi command đơn giản
+        if (HAL_I2C_Master_Transmit(hpn532->hi2c, PN532_I2C_ADDRESS << 1, &cmd, 1, 200) == HAL_OK) {
+            HAL_Delay(50); // Chờ PN532 xử lý
+            
+            // Đọc response
+            if (HAL_I2C_Master_Receive(hpn532->hi2c, PN532_I2C_ADDRESS << 1, response, 8, 200) == HAL_OK) {
+                // Kiểm tra response hợp lệ
+                if (response[0] != 0x00 || response[1] != 0x00) {
+                    // Giả sử 4 byte đầu là version data
+                    *version = (response[0] << 24) | (response[1] << 16) | (response[2] << 8) | response[3];
+                    return PN532_STATUS_OK;
+                }
             }
         }
+        
+        HAL_Delay(100); // Chờ giữa các lần thử
     }
     
     return PN532_STATUS_ERROR;

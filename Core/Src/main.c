@@ -55,12 +55,12 @@ const osThreadAttr_t defaultTask_attributes = {
   .priority = (osPriority_t) osPriorityNormal,
 };
 /* Definitions for modbusTask */
-osThreadId_t modbusTaskHandle;
-const osThreadAttr_t modbusTask_attributes = {
-  .name = "modbusTask",
-  .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityNormal,
-};
+// osThreadId_t modbusTaskHandle;
+// const osThreadAttr_t modbusTask_attributes = {
+//   .name = "modbusTask",
+//   .stack_size = 128 * 4,
+//   .priority = (osPriority_t) osPriorityNormal,
+// };
 /* Definitions for sensorTask */
 osThreadId_t sensorTaskHandle;
 const osThreadAttr_t sensorTask_attributes = {
@@ -79,7 +79,7 @@ const osThreadAttr_t nfcTask_attributes = {
 // Module handles
 PN532_Handle_t hpn532;
 BNO055_Handle_t hbno055;
-Modbus_Handle_t hmodbus;
+// Modbus_Handle_t hmodbus;
 
 // Data buffers
 uint16_t sensor_data[32];
@@ -91,6 +91,9 @@ bool sensors_initialized = false;
 
 // Debug buffer
 char debug_buffer[128];
+
+// IMU fail counter for error handling
+uint32_t imu_fail_counter = 0;
 
 // RTOS synchronization objects
 osMutexId_t dataMutexHandle;
@@ -111,7 +114,7 @@ const osEventFlagsAttr_t systemEvents_attributes = {
 // Event flags
 #define EVENT_SENSOR_DATA_READY    (1UL << 0)
 #define EVENT_NFC_DATA_READY       (1UL << 1)
-#define EVENT_MODBUS_REQUEST       (1UL << 2)
+// #define EVENT_MODBUS_REQUEST       (1UL << 2)
 #define EVENT_SYSTEM_ERROR         (1UL << 3)
 /* USER CODE END PV */
 
@@ -122,7 +125,7 @@ static void MX_I2C1_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_USART2_UART_Init(void);
 void StartDefaultTask(void *argument);
-void StartModbusTask(void *argument);
+// void StartModbusTask(void *argument);
 void StartSensorTask(void *argument);
 void StartNfcTask(void *argument);
 
@@ -132,6 +135,7 @@ void UpdateSensorData(void);
 void UpdateNFCData(void);
 void ProcessModbusCommands(void);
 void DebugPrint(const char* format, ...);
+void I2C_BasicTest(void);
 void I2C_Scanner(void);
 void DebugDumpHex(const char* label, uint8_t* data, uint8_t len);
 /* USER CODE END PFP */
@@ -210,7 +214,7 @@ int main(void)
   defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
 
   /* creation of modbusTask */
-  modbusTaskHandle = osThreadNew(StartModbusTask, NULL, &modbusTask_attributes);
+  // modbusTaskHandle = osThreadNew(StartModbusTask, NULL, &modbusTask_attributes);
 
   /* creation of sensorTask */
   sensorTaskHandle = osThreadNew(StartSensorTask, NULL, &sensorTask_attributes);
@@ -429,6 +433,7 @@ void SystemInit_Modules(void)
     
     // Scan I2C bus for devices
     DebugPrint("Scanning I2C bus...\r\n");
+    
     I2C_Scanner();
     
     // Initialize BNO055 IMU
@@ -436,6 +441,16 @@ void SystemInit_Modules(void)
     BNO055_Status_t bno_status = BNO055_Init(&hbno055, &hi2c1);
     if (bno_status == BNO055_STATUS_OK) {
         DebugPrint("BNO055 initialized successfully\r\n");
+        
+        // Check BNO055 operational status
+        uint8_t sys_stat, sys_err;
+        if (BNO055_ReadSystemStatus(&hbno055, &sys_stat, &sys_err) == BNO055_STATUS_OK) {
+            DebugPrint("  System Status: 0x%02X, System Error: 0x%02X\r\n", sys_stat, sys_err);
+        }
+        
+        // Check operation mode
+        DebugPrint("  Operation Mode: 0x%02X\r\n", hbno055.operation_mode);
+        
         system_status |= 0x01; // IMU OK
     } else {
         uint8_t error_code = BNO055_GetErrorCode(&hbno055);
@@ -471,30 +486,30 @@ void SystemInit_Modules(void)
     }
     
     // Initialize Modbus slave
-    DebugPrint("Initializing Modbus slave...\r\n");
+    // DebugPrint("Initializing Modbus slave...\r\n");
     
     // Check UART2 state first
-    DebugPrint("UART2 State: %d ", huart2.gState);
-    switch(huart2.gState) {
-        case HAL_UART_STATE_RESET:     DebugPrint("(RESET)\r\n"); break;
-        case HAL_UART_STATE_READY:     DebugPrint("(READY)\r\n"); break;
-        case HAL_UART_STATE_BUSY:      DebugPrint("(BUSY)\r\n"); break;
-        case HAL_UART_STATE_BUSY_TX:   DebugPrint("(BUSY_TX)\r\n"); break;
-        case HAL_UART_STATE_BUSY_RX:   DebugPrint("(BUSY_RX)\r\n"); break;
-        case HAL_UART_STATE_BUSY_TX_RX: DebugPrint("(BUSY_TX_RX)\r\n"); break;
-        case HAL_UART_STATE_TIMEOUT:   DebugPrint("(TIMEOUT)\r\n"); break;
-        case HAL_UART_STATE_ERROR:     DebugPrint("(ERROR)\r\n"); break;
-        default: DebugPrint("(UNKNOWN)\r\n"); break;
-    }
+    // DebugPrint("UART2 State: %d ", huart2.gState);
+    // switch(huart2.gState) {
+    //     case HAL_UART_STATE_RESET:     DebugPrint("(RESET)\r\n"); break;
+    //     case HAL_UART_STATE_READY:     DebugPrint("(READY)\r\n"); break;
+    //     case HAL_UART_STATE_BUSY:      DebugPrint("(BUSY)\r\n"); break;
+    //     case HAL_UART_STATE_BUSY_TX:   DebugPrint("(BUSY_TX)\r\n"); break;
+    //     case HAL_UART_STATE_BUSY_RX:   DebugPrint("(BUSY_RX)\r\n"); break;
+    //     case HAL_UART_STATE_BUSY_TX_RX: DebugPrint("(BUSY_TX_RX)\r\n"); break;
+    //     case HAL_UART_STATE_TIMEOUT:   DebugPrint("(TIMEOUT)\r\n"); break;
+    //     case HAL_UART_STATE_ERROR:     DebugPrint("(ERROR)\r\n"); break;
+    //     default: DebugPrint("(UNKNOWN)\r\n"); break;
+    // }
     
-    Modbus_Status_t modbus_status = Modbus_Init(&hmodbus, &huart2, 4);
-    if (modbus_status == MODBUS_STATUS_OK) {
-        DebugPrint("Modbus slave initialized successfully\r\n");
-        system_status |= 0x04; // Modbus OK
-    } else {
-        DebugPrint("Modbus slave initialization failed with status: %d\r\n", modbus_status);
-        system_error |= 0x04; // Modbus Error
-    }
+    // Modbus_Status_t modbus_status = Modbus_Init(&hmodbus, &huart2, 4);
+    // if (modbus_status == MODBUS_STATUS_OK) {
+    //     DebugPrint("Modbus slave initialized successfully\r\n");
+    //     system_status |= 0x04; // Modbus OK
+    // } else {
+    //     DebugPrint("Modbus slave initialization failed with status: %d\r\n", modbus_status);
+    //     system_error |= 0x04; // Modbus Error
+    // }
     
     sensors_initialized = true;
     DebugPrint("Module initialization completed\r\n");
@@ -517,36 +532,36 @@ void DebugPrint(const char* format, ...)
 /**
  * @brief UART2 Rx Complete callback (for Modbus)
  */
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
-{
-    if (huart == &huart2) {
-        Modbus_RxCallback(&hmodbus);
-        // Signal Modbus task that data is available
-        osEventFlagsSet(systemEventsHandle, EVENT_MODBUS_REQUEST);
-    }
-}
+// void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+// {
+//     if (huart == &huart2) {
+//         Modbus_RxCallback(&hmodbus);
+//         // Signal Modbus task that data is available
+//         osEventFlagsSet(systemEventsHandle, EVENT_MODBUS_REQUEST);
+//     }
+// }
 
 /**
  * @brief UART2 Tx Complete callback (for Modbus)
  */
-void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
-{
-    if (huart == &huart2) {
-        Modbus_TxCallback(&hmodbus);
-    }
-}
+// void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
+// {
+//     if (huart == &huart2) {
+//         Modbus_TxCallback(&hmodbus);
+//     }
+// }
 
 /**
  * @brief UART Error callback
  */
-void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
-{
-    if (huart == &huart2) {
-        Modbus_ErrorCallback(&hmodbus);
-        // Signal system error
-        osEventFlagsSet(systemEventsHandle, EVENT_SYSTEM_ERROR);
-    }
-}
+// void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+// {
+//     if (huart == &huart2) {
+//         Modbus_ErrorCallback(&hmodbus);
+//         // Signal system error
+//         osEventFlagsSet(systemEventsHandle, EVENT_SYSTEM_ERROR);
+//     }
+// }
 
 /**
  * @brief I2C Scanner to detect devices on the bus
@@ -650,14 +665,27 @@ void StartDefaultTask(void *argument)
       osEventFlagsClear(systemEventsHandle, EVENT_SYSTEM_ERROR);
       
       // Attempt to reinitialize failed modules (only if not hardware issue)
+      static uint32_t imu_recovery_attempts = 0;
+      
       if (system_error & 0x01) {
-        // Reinitialize IMU
-        if (BNO055_Init(&hbno055, &hi2c1) == BNO055_STATUS_OK) {
-          system_error &= ~0x01;
-          system_status |= 0x01;
-          DebugPrint("IMU recovery successful\r\n");
-        } else {
-          DebugPrint("IMU recovery failed - hardware issue\r\n");
+        if (imu_recovery_attempts < 3) { // Limit recovery attempts
+          imu_recovery_attempts++;
+          DebugPrint("IMU recovery attempt %lu/3\r\n", imu_recovery_attempts);
+          
+          // Reinitialize IMU
+          if (BNO055_Init(&hbno055, &hi2c1) == BNO055_STATUS_OK) {
+            system_error &= ~0x01;
+            system_status |= 0x01;
+            imu_recovery_attempts = 0; // Reset counter on success
+            DebugPrint("IMU recovery successful\r\n");
+          } else {
+            DebugPrint("IMU recovery failed - attempt %lu\r\n", imu_recovery_attempts);
+            if (imu_recovery_attempts >= 3) {
+              DebugPrint("IMU recovery failed - giving up after 3 attempts\r\n");
+              system_error &= ~0x01; // Clear error to stop recovery loop
+              system_status &= ~0x01; // Mark as unavailable
+            }
+          }
         }
       }
       
@@ -692,63 +720,63 @@ void StartDefaultTask(void *argument)
 * @retval None
 */
 /* USER CODE END Header_StartModbusTask */
-void StartModbusTask(void *argument)
-{
-  /* USER CODE BEGIN StartModbusTask */
-  // Wait for system initialization
-  osEventFlagsWait(systemEventsHandle, EVENT_SENSOR_DATA_READY, osFlagsWaitAny, osWaitForever);
-  
-  DebugPrint("Modbus Task Started\r\n");
-  
-  /* Infinite loop */
-  for(;;)
-  {
-    // Wait for Modbus request or timeout
-    uint32_t events = osEventFlagsWait(systemEventsHandle, 
-                                      EVENT_MODBUS_REQUEST, 
-                                      osFlagsWaitAny, 
-                                      10); // 10ms timeout
-    
-    // Check if Modbus request event was received
-    if (events & EVENT_MODBUS_REQUEST) {
-      // Clear the event flag
-      osEventFlagsClear(systemEventsHandle, EVENT_MODBUS_REQUEST);
-    }
-    
-    // Process Modbus communication
-    if (sensors_initialized) {
-      // Acquire data mutex before updating system registers
-      if (osMutexAcquire(dataMutexHandle, 10) == osOK) {
-        // Update system registers
-        Modbus_SetRegisterValue(&hmodbus, REG_SYSTEM_STATUS, system_status);
-        Modbus_SetRegisterValue(&hmodbus, REG_SYSTEM_ERROR, system_error);
-        
-        // Process Modbus communication
-        Modbus_Process(&hmodbus);
-        
-        // Handle special commands
-        uint16_t reset_cmd;
-        if (Modbus_GetRegisterValue(&hmodbus, REG_RESET_ERROR_CMD, &reset_cmd) == MODBUS_STATUS_OK) {
-          if (reset_cmd == 0x0001) {
-            // Reset all error flags
-            system_error = 0;
-            Modbus_SetRegisterValue(&hmodbus, REG_IMU_ERROR, 0);
-            Modbus_SetRegisterValue(&hmodbus, REG_PN532_ERROR, 0);
-            Modbus_SetRegisterValue(&hmodbus, REG_SYSTEM_ERROR, 0);
-            Modbus_SetRegisterValue(&hmodbus, REG_RESET_ERROR_CMD, 0); // Clear command
-            
-            DebugPrint("Error flags reset\r\n");
-          }
-        }
-        
-        osMutexRelease(dataMutexHandle);
-      }
-    }
-    
-    osDelay(1); // Small delay to prevent busy waiting
-  }
-  /* USER CODE END StartModbusTask */
-}
+// void StartModbusTask(void *argument)
+// {
+//   /* USER CODE BEGIN StartModbusTask */
+//   // Wait for system initialization
+//   osEventFlagsWait(systemEventsHandle, EVENT_SENSOR_DATA_READY, osFlagsWaitAny, osWaitForever);
+//   
+//   DebugPrint("Modbus Task Started\r\n");
+//   
+//   /* Infinite loop */
+//   for(;;)
+//   {
+//     // Wait for Modbus request or timeout
+//     uint32_t events = osEventFlagsWait(systemEventsHandle, 
+//                                       EVENT_MODBUS_REQUEST, 
+//                                       osFlagsWaitAny, 
+//                                       10); // 10ms timeout
+//     
+//     // Check if Modbus request event was received
+//     if (events & EVENT_MODBUS_REQUEST) {
+//       // Clear the event flag
+//       osEventFlagsClear(systemEventsHandle, EVENT_MODBUS_REQUEST);
+//     }
+//     
+//     // Process Modbus communication
+//     if (sensors_initialized) {
+//       // Acquire data mutex before updating system registers
+//       if (osMutexAcquire(dataMutexHandle, 10) == osOK) {
+//         // Update system registers
+//         Modbus_SetRegisterValue(&hmodbus, REG_SYSTEM_STATUS, system_status);
+//         Modbus_SetRegisterValue(&hmodbus, REG_SYSTEM_ERROR, system_error);
+//         
+//         // Process Modbus communication
+//         Modbus_Process(&hmodbus);
+//         
+//         // Handle special commands
+//         uint16_t reset_cmd;
+//         if (Modbus_GetRegisterValue(&hmodbus, REG_RESET_ERROR_CMD, &reset_cmd) == MODBUS_STATUS_OK) {
+//           if (reset_cmd == 0x0001) {
+//             // Reset all error flags
+//             system_error = 0;
+//             Modbus_SetRegisterValue(&hmodbus, REG_IMU_ERROR, 0);
+//             Modbus_SetRegisterValue(&hmodbus, REG_PN532_ERROR, 0);
+//             Modbus_SetRegisterValue(&hmodbus, REG_SYSTEM_ERROR, 0);
+//             Modbus_SetRegisterValue(&hmodbus, REG_RESET_ERROR_CMD, 0); // Clear command
+//             
+//             DebugPrint("Error flags reset\r\n");
+//           }
+//         }
+//         
+//         osMutexRelease(dataMutexHandle);
+//       }
+//     }
+//     
+//     osDelay(1); // Small delay to prevent busy waiting
+//   }
+//   /* USER CODE END StartModbusTask */
+// }
 
 /* USER CODE BEGIN Header_StartSensorTask */
 /**
@@ -771,55 +799,100 @@ void StartSensorTask(void *argument)
     if (sensors_initialized && (system_status & 0x01)) {
       // BNO055 is available, read real data
       if (osMutexAcquire(dataMutexHandle, 100) == osOK) {
-        if (BNO055_ReadAllSensors(&hbno055) == BNO055_STATUS_OK) {
+        BNO055_Status_t read_status = BNO055_ReadAllSensors(&hbno055);
+        
+        // Debug every 10th read to avoid spam
+        static uint32_t read_debug_counter = 0;
+        if (++read_debug_counter >= 10) {
+          DebugPrint("BNO055_ReadAllSensors status: %d\r\n", read_status);
+          read_debug_counter = 0;
+        }
+        
+        if (read_status == BNO055_STATUS_OK) {
           BNO055_Vector_t *accel = BNO055_GetAccel(&hbno055);
           BNO055_Vector_t *gyro = BNO055_GetGyro(&hbno055);
           BNO055_Vector_t *mag = BNO055_GetMag(&hbno055);
           
+          // Debug output to verify sensor task is running (convert to int for printf)
+          DebugPrint("IMU Data - Accel: %d,%d,%d | Gyro: %d,%d,%d | Mag: %d,%d,%d\r\n",
+                     (accel->x), (accel->y), (accel->z), 
+                     (gyro->x), (gyro->y), (gyro->z),
+                     (mag->x), (mag->y), (mag->z));
+          
           // Update Modbus registers
-          Modbus_SetRegisterValue(&hmodbus, REG_ACCEL_X, (uint16_t)accel->x);
-          Modbus_SetRegisterValue(&hmodbus, REG_ACCEL_Y, (uint16_t)accel->y);
-          Modbus_SetRegisterValue(&hmodbus, REG_ACCEL_Z, (uint16_t)accel->z);
+          // Modbus_SetRegisterValue(&hmodbus, REG_ACCEL_X, (uint16_t)accel->x);
+          // Modbus_SetRegisterValue(&hmodbus, REG_ACCEL_Y, (uint16_t)accel->y);
+          // Modbus_SetRegisterValue(&hmodbus, REG_ACCEL_Z, (uint16_t)accel->z);
           
-          Modbus_SetRegisterValue(&hmodbus, REG_GYRO_X, (uint16_t)gyro->x);
-          Modbus_SetRegisterValue(&hmodbus, REG_GYRO_Y, (uint16_t)gyro->y);
-          Modbus_SetRegisterValue(&hmodbus, REG_GYRO_Z, (uint16_t)gyro->z);
+          // Modbus_SetRegisterValue(&hmodbus, REG_GYRO_X, (uint16_t)gyro->x);
+          // Modbus_SetRegisterValue(&hmodbus, REG_GYRO_Y, (uint16_t)gyro->y);
+          // Modbus_SetRegisterValue(&hmodbus, REG_GYRO_Z, (uint16_t)gyro->z);
           
-          Modbus_SetRegisterValue(&hmodbus, REG_MAG_X, (uint16_t)mag->x);
-          Modbus_SetRegisterValue(&hmodbus, REG_MAG_Y, (uint16_t)mag->y);
-          Modbus_SetRegisterValue(&hmodbus, REG_MAG_Z, (uint16_t)mag->z);
+          // Modbus_SetRegisterValue(&hmodbus, REG_MAG_X, (uint16_t)mag->x);
+          // Modbus_SetRegisterValue(&hmodbus, REG_MAG_Y, (uint16_t)mag->y);
+          // Modbus_SetRegisterValue(&hmodbus, REG_MAG_Z, (uint16_t)mag->z);
           
           // Update IMU status
-          BNO055_CalibStatus_t *calib = BNO055_GetCalibStatus(&hbno055);
-          uint16_t imu_status = (calib->system << 6) | (calib->gyro << 4) | 
-                               (calib->accel << 2) | calib->mag;
-          Modbus_SetRegisterValue(&hmodbus, REG_IMU_STATUS, imu_status);
+          // BNO055_CalibStatus_t *calib = BNO055_GetCalibStatus(&hbno055);
+          // uint16_t imu_status = (calib->system << 6) | (calib->gyro << 4) | 
+          //                      (calib->accel << 2) | calib->mag;
+          // Modbus_SetRegisterValue(&hmodbus, REG_IMU_STATUS, imu_status);
           
-          uint8_t error_code = BNO055_GetErrorCode(&hbno055);
-          Modbus_SetRegisterValue(&hmodbus, REG_IMU_ERROR, error_code);
+          // uint8_t error_code = BNO055_GetErrorCode(&hbno055);
+          // Modbus_SetRegisterValue(&hmodbus, REG_IMU_ERROR, error_code);
+          
+          // Reset fail counter on success
+          extern uint32_t imu_fail_counter; // Declare extern
+          imu_fail_counter = 0;
           
           system_error &= ~0x01; // Clear IMU error
         } else {
-          system_error |= 0x01; // Set IMU error
-          Modbus_SetRegisterValue(&hmodbus, REG_IMU_ERROR, 0x01);
-          osEventFlagsSet(systemEventsHandle, EVENT_SYSTEM_ERROR);
+          DebugPrint("IMU read failed! Status: %d\r\n", read_status);
+          
+          // Check what specifically failed
+          uint8_t sys_stat, sys_err;
+          if (BNO055_ReadSystemStatus(&hbno055, &sys_stat, &sys_err) == BNO055_STATUS_OK) {
+              DebugPrint("  System Status: 0x%02X, System Error: 0x%02X\r\n", sys_stat, sys_err);
+          }
+          
+          // Check calibration status
+          BNO055_CalibStatus_t *calib = BNO055_GetCalibStatus(&hbno055);
+          DebugPrint("  Calibration - Sys:%d Gyro:%d Accel:%d Mag:%d\r\n", 
+                     calib->system, calib->gyro, calib->accel, calib->mag);
+          
+          // Only trigger system error after multiple consecutive failures
+          extern uint32_t imu_fail_counter; // Use extern
+          imu_fail_counter++;
+          
+          if (imu_fail_counter >= 10) { // Trigger error after 10 consecutive failures
+            system_error |= 0x01; // Set IMU error
+            // Modbus_SetRegisterValue(&hmodbus, REG_IMU_ERROR, 0x01);
+            osEventFlagsSet(systemEventsHandle, EVENT_SYSTEM_ERROR);
+            imu_fail_counter = 0; // Reset counter
+          }
         }
         osMutexRelease(dataMutexHandle);
       }
     } else {
       // BNO055 not available, provide dummy/default data
+      static uint32_t bno_debug_counter = 0;
+      if (++bno_debug_counter >= 50) { // Less frequent for this message
+        DebugPrint("BNO055 not available - sensors_initialized: %d, system_status: 0x%02X\r\n", 
+                   sensors_initialized, system_status);
+        bno_debug_counter = 0;
+      }
       if (osMutexAcquire(dataMutexHandle, 10) == osOK) {
-        Modbus_SetRegisterValue(&hmodbus, REG_ACCEL_X, 0x0000);
-        Modbus_SetRegisterValue(&hmodbus, REG_ACCEL_Y, 0x0000);
-        Modbus_SetRegisterValue(&hmodbus, REG_ACCEL_Z, 0x0000);
-        Modbus_SetRegisterValue(&hmodbus, REG_GYRO_X, 0x0000);
-        Modbus_SetRegisterValue(&hmodbus, REG_GYRO_Y, 0x0000);
-        Modbus_SetRegisterValue(&hmodbus, REG_GYRO_Z, 0x0000);
-        Modbus_SetRegisterValue(&hmodbus, REG_MAG_X, 0x0000);
-        Modbus_SetRegisterValue(&hmodbus, REG_MAG_Y, 0x0000);
-        Modbus_SetRegisterValue(&hmodbus, REG_MAG_Z, 0x0000);
-        Modbus_SetRegisterValue(&hmodbus, REG_IMU_STATUS, 0x00);
-        Modbus_SetRegisterValue(&hmodbus, REG_IMU_ERROR, 0xFF); // Sensor not connected
+        // Modbus_SetRegisterValue(&hmodbus, REG_ACCEL_X, 0x0000);
+        // Modbus_SetRegisterValue(&hmodbus, REG_ACCEL_Y, 0x0000);
+        // Modbus_SetRegisterValue(&hmodbus, REG_ACCEL_Z, 0x0000);
+        // Modbus_SetRegisterValue(&hmodbus, REG_GYRO_X, 0x0000);
+        // Modbus_SetRegisterValue(&hmodbus, REG_GYRO_Y, 0x0000);
+        // Modbus_SetRegisterValue(&hmodbus, REG_GYRO_Z, 0x0000);
+        // Modbus_SetRegisterValue(&hmodbus, REG_MAG_X, 0x0000);
+        // Modbus_SetRegisterValue(&hmodbus, REG_MAG_Y, 0x0000);
+        // Modbus_SetRegisterValue(&hmodbus, REG_MAG_Z, 0x0000);
+        // Modbus_SetRegisterValue(&hmodbus, REG_IMU_STATUS, 0x00);
+        // Modbus_SetRegisterValue(&hmodbus, REG_IMU_ERROR, 0xFF); // Sensor not connected
         osMutexRelease(dataMutexHandle);
       }
     }
@@ -848,6 +921,14 @@ void StartNfcTask(void *argument)
   /* Infinite loop */
   for(;;)
   {
+    // Debug every 10th iteration to avoid spam
+    static uint32_t nfc_debug_counter = 0;
+    if (++nfc_debug_counter >= 10) {
+      DebugPrint("NFC Task running - sensors_initialized: %d, system_status: 0x%02X\r\n", 
+                 sensors_initialized, system_status);
+      nfc_debug_counter = 0;
+    }
+    
     if (sensors_initialized && (system_status & 0x02)) {
       // PN532 is available, read real data
       if (osMutexAcquire(dataMutexHandle, 100) == osOK) {
@@ -855,38 +936,38 @@ void StartNfcTask(void *argument)
         
         if (status == PN532_STATUS_OK && PN532_IsCardPresent(&hpn532)) {
           // Card detected
-          uint8_t *uid = PN532_GetCardUID(&hpn532);
-          uint8_t card_type = PN532_GetCardType(&hpn532);
+          // uint8_t *uid = PN532_GetCardUID(&hpn532);
+          // uint8_t card_type = PN532_GetCardType(&hpn532);
           
-          uint16_t uid_low = (uid[1] << 8) | uid[0];
-          uint16_t uid_high = (uid[3] << 8) | uid[2];
+          // uint16_t uid_low = (uid[1] << 8) | uid[0];
+          // uint16_t uid_high = (uid[3] << 8) | uid[2];
           
-          Modbus_SetRegisterValue(&hmodbus, REG_PN532_DATA_LOW, uid_low);
-          Modbus_SetRegisterValue(&hmodbus, REG_PN532_DATA_HIGH, uid_high);
-          Modbus_SetRegisterValue(&hmodbus, REG_PN532_CARD_TYPE, card_type);
-          Modbus_SetRegisterValue(&hmodbus, REG_PN532_STATUS, 0x01); // Card present
-          Modbus_SetRegisterValue(&hmodbus, REG_PN532_ERROR, 0x00);
-          Modbus_SetRegisterValue(&hmodbus, REG_PN532_CARD_UID, uid_low);
+          // Modbus_SetRegisterValue(&hmodbus, REG_PN532_DATA_LOW, uid_low);
+          // Modbus_SetRegisterValue(&hmodbus, REG_PN532_DATA_HIGH, uid_high);
+          // Modbus_SetRegisterValue(&hmodbus, REG_PN532_CARD_TYPE, card_type);
+          // Modbus_SetRegisterValue(&hmodbus, REG_PN532_STATUS, 0x01); // Card present
+          // Modbus_SetRegisterValue(&hmodbus, REG_PN532_ERROR, 0x00);
+          // Modbus_SetRegisterValue(&hmodbus, REG_PN532_CARD_UID, uid_low);
           
           system_error &= ~0x02; // Clear NFC error
           osEventFlagsSet(systemEventsHandle, EVENT_NFC_DATA_READY);
           
         } else if (status == PN532_STATUS_NO_CARD) {
           // No card detected
-          Modbus_SetRegisterValue(&hmodbus, REG_PN532_DATA_LOW, 0x0000);
-          Modbus_SetRegisterValue(&hmodbus, REG_PN532_DATA_HIGH, 0x0000);
-          Modbus_SetRegisterValue(&hmodbus, REG_PN532_CARD_TYPE, 0x00);
-          Modbus_SetRegisterValue(&hmodbus, REG_PN532_STATUS, 0x00);
-          Modbus_SetRegisterValue(&hmodbus, REG_PN532_ERROR, 0x00);
-          Modbus_SetRegisterValue(&hmodbus, REG_PN532_CARD_UID, 0x0000);
+          // Modbus_SetRegisterValue(&hmodbus, REG_PN532_DATA_LOW, 0x0000);
+          // Modbus_SetRegisterValue(&hmodbus, REG_PN532_DATA_HIGH, 0x0000);
+          // Modbus_SetRegisterValue(&hmodbus, REG_PN532_CARD_TYPE, 0x00);
+          // Modbus_SetRegisterValue(&hmodbus, REG_PN532_STATUS, 0x00);
+          // Modbus_SetRegisterValue(&hmodbus, REG_PN532_ERROR, 0x00);
+          // Modbus_SetRegisterValue(&hmodbus, REG_PN532_CARD_UID, 0x0000);
           
           system_error &= ~0x02; // Clear NFC error
         } else {
           // Communication error
           system_error |= 0x02;
-          uint8_t error_code = PN532_GetErrorCode(&hpn532);
-          Modbus_SetRegisterValue(&hmodbus, REG_PN532_STATUS, 0x00);
-          Modbus_SetRegisterValue(&hmodbus, REG_PN532_ERROR, error_code);
+          // uint8_t error_code = PN532_GetErrorCode(&hpn532);
+          // Modbus_SetRegisterValue(&hmodbus, REG_PN532_STATUS, 0x00);
+          // Modbus_SetRegisterValue(&hmodbus, REG_PN532_ERROR, error_code);
           osEventFlagsSet(systemEventsHandle, EVENT_SYSTEM_ERROR);
         }
         osMutexRelease(dataMutexHandle);
@@ -894,12 +975,12 @@ void StartNfcTask(void *argument)
     } else {
       // PN532 not available, provide default data
       if (osMutexAcquire(dataMutexHandle, 10) == osOK) {
-        Modbus_SetRegisterValue(&hmodbus, REG_PN532_DATA_LOW, 0x0000);
-        Modbus_SetRegisterValue(&hmodbus, REG_PN532_DATA_HIGH, 0x0000);
-        Modbus_SetRegisterValue(&hmodbus, REG_PN532_CARD_TYPE, 0x00);
-        Modbus_SetRegisterValue(&hmodbus, REG_PN532_STATUS, 0x00);
-        Modbus_SetRegisterValue(&hmodbus, REG_PN532_ERROR, 0xFF); // Sensor not connected
-        Modbus_SetRegisterValue(&hmodbus, REG_PN532_CARD_UID, 0x0000);
+        // Modbus_SetRegisterValue(&hmodbus, REG_PN532_DATA_LOW, 0x0000);
+        // Modbus_SetRegisterValue(&hmodbus, REG_PN532_DATA_HIGH, 0x0000);
+        // Modbus_SetRegisterValue(&hmodbus, REG_PN532_CARD_TYPE, 0x00);
+        // Modbus_SetRegisterValue(&hmodbus, REG_PN532_STATUS, 0x00);
+        // Modbus_SetRegisterValue(&hmodbus, REG_PN532_ERROR, 0xFF); // Sensor not connected
+        // Modbus_SetRegisterValue(&hmodbus, REG_PN532_CARD_UID, 0x0000);
         osMutexRelease(dataMutexHandle);
       }
     }

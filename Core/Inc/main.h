@@ -33,8 +33,8 @@ extern "C" {
 /* USER CODE BEGIN Includes */
 #include "pn532.h"
 #include "bno055.h"
-#include "modbus_slave.h"
-#include "modbus_regs.h"
+// #include "modbus_slave.h"
+// #include "modbus_regs.h"
 #include <stdio.h>
 /* USER CODE END Includes */
 
