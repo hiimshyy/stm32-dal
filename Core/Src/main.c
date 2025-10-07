@@ -24,6 +24,7 @@
 /* USER CODE BEGIN Includes */
 #include <stdarg.h>
 #include <string.h>
+#include <math.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -65,7 +66,7 @@ const osThreadAttr_t defaultTask_attributes = {
 osThreadId_t sensorTaskHandle;
 const osThreadAttr_t sensorTask_attributes = {
   .name = "sensorTask",
-  .stack_size = 128 * 4,
+  .stack_size = 128 * 8,
   .priority = (osPriority_t) osPriorityNormal,
 };
 /* Definitions for nfcTask */
@@ -77,12 +78,19 @@ const osThreadAttr_t nfcTask_attributes = {
 };
 /* USER CODE BEGIN PV */
 // Module handles
-PN532_Handle_t hpn532;
+PN532_Config pn532_config;
 BNO055_Handle_t hbno055;
 // Modbus_Handle_t hmodbus;
 
 // Data buffers
 uint16_t sensor_data[32];
+
+// NFC/RFID data
+uint8_t nfc_card_uid[7];
+uint8_t nfc_card_uid_length = 0;
+uint8_t nfc_card_type = 0;
+bool nfc_card_present = false;
+uint32_t nfc_last_card_uid = 0; // For detecting card changes
 
 // Status variables
 uint8_t system_status = 0;
@@ -433,12 +441,24 @@ void SystemInit_Modules(void)
     
     // Scan I2C bus for devices
     DebugPrint("Scanning I2C bus...\r\n");
-    
+
     I2C_Scanner();
     
-    // Initialize BNO055 IMU
+    // Initialize BNO055 IMU with retry mechanism
     DebugPrint("Initializing BNO055...\r\n");
-    BNO055_Status_t bno_status = BNO055_Init(&hbno055, &hi2c1);
+    
+    BNO055_Status_t bno_status = BNO055_STATUS_ERROR;
+    for (int retry = 0; retry < 3 && bno_status != BNO055_STATUS_OK; retry++) {
+        if (retry > 0) {
+            DebugPrint("BNO055 retry attempt %d/3\r\n", retry + 1);
+            HAL_Delay(500); // Longer delay for retry
+        } else {
+            HAL_Delay(100); // Initial startup delay
+        }
+        
+        bno_status = BNO055_Init(&hbno055, &hi2c1);
+    }
+    
     if (bno_status == BNO055_STATUS_OK) {
         DebugPrint("BNO055 initialized successfully\r\n");
         
@@ -454,7 +474,7 @@ void SystemInit_Modules(void)
         system_status |= 0x01; // IMU OK
     } else {
         uint8_t error_code = BNO055_GetErrorCode(&hbno055);
-        DebugPrint("BNO055 initialization failed with error: 0x%02X\r\n", error_code);
+        DebugPrint("BNO055 initialization failed after 3 attempts with error: 0x%02X\r\n", error_code);
         if (error_code == 0xFF) {
             DebugPrint("  -> Communication failed - check I2C connections\r\n");
         } else if (error_code == 0x00) {
@@ -465,24 +485,33 @@ void SystemInit_Modules(void)
         system_error |= 0x01; // IMU Error
     }
     
-    // Initialize PN532 NFC/RFID
+    // Initialize PN532 NFC/RFID with retry mechanism
     DebugPrint("Initializing PN532...\r\n");
-    PN532_Status_t pn532_status = PN532_Init(&hpn532, &hi2c1);
+    
+    // Configure PN532
+    pn532_config.hi2c = &hi2c1;
+    pn532_config.i2c_addr = PN532_I2C_ADDRESS << 1; // HAL expects 8-bit address
+    pn532_config.reset_port = NULL; // No reset pin configured
+    pn532_config.reset_pin = 0;
+    pn532_config.log = DebugPrint; // Use our debug print function
+    
+    PN532_Status_t pn532_status = PN532_STATUS_ERROR;
+    for (int retry = 0; retry < 3 && pn532_status != PN532_STATUS_OK; retry++) {
+        if (retry > 0) {
+            DebugPrint("PN532 retry attempt %d/3\r\n", retry + 1);
+            HAL_Delay(500); // Longer delay for retry
+        } else {
+            HAL_Delay(100); // Delay between sensor initializations
+        }
+        
+        pn532_status = PN532_Init(&pn532_config);
+    }
+    
     if (pn532_status == PN532_STATUS_OK) {
-        PN532_SetMode(&hpn532, PN532_MODE_NFC);
         DebugPrint("PN532 initialized successfully\r\n");
         system_status |= 0x02; // NFC OK
     } else {
-        uint8_t error_code = PN532_GetErrorCode(&hpn532);
-        DebugPrint("PN532 initialization failed with error: %d\r\n", error_code);
-        if (error_code == 1) {
-            DebugPrint("  -> Firmware version read failed - check PN532 wiring/power\r\n");
-        } else if (error_code == 2) {
-            DebugPrint("  -> SAM configuration failed\r\n");
-        } else {
-            DebugPrint("  -> Unknown error\r\n");
-        }
-        system_error |= 0x02; // NFC Error
+        DebugPrint("PN532 initialization failed\n");
     }
     
     // Initialize Modbus slave
@@ -571,6 +600,7 @@ void I2C_Scanner(void)
     uint8_t devices_found = 0;
     DebugPrint("I2C Scanner starting...\r\n");
     DebugPrint("Expected devices: BNO055 (0x%02X), PN532 (0x%02X)\r\n", BNO055_I2C_ADDR, PN532_I2C_ADDRESS);
+    DebugPrint("I2C Clock Speed: %lu Hz\r\n", hi2c1.Init.ClockSpeed);
     
     // Check I2C peripheral state
     DebugPrint("I2C1 State: %d ", hi2c1.State);
@@ -626,8 +656,10 @@ void I2C_Scanner(void)
         DebugPrint("No I2C devices found! Possible issues:\r\n");
         DebugPrint("  - Check SDA/SCL connections (PB7/PB6)\r\n");
         DebugPrint("  - Check pull-up resistors (4.7kΩ)\r\n");
-        DebugPrint("  - Check power supply to sensors\r\n");
-        DebugPrint("  - Verify I2C clock speed (currently 100kHz)\r\n");
+        DebugPrint("  - Check power supply to sensors (3.3V)\r\n");
+        DebugPrint("  - Verify I2C clock speed (currently %lu Hz)\r\n", hi2c1.Init.ClockSpeed);
+        DebugPrint("  - BNO055: Check COM3 pin for address selection\r\n");
+        DebugPrint("  - PN532: Check if in I2C mode (not SPI/UART)\r\n");
     } else {
         DebugPrint("I2C scan completed. Found %d device(s)\r\n", devices_found);
     }
@@ -691,7 +723,7 @@ void StartDefaultTask(void *argument)
       
       if (system_error & 0x02) {
         // Reinitialize NFC
-        if (PN532_Init(&hpn532, &hi2c1) == PN532_STATUS_OK) {
+        if (PN532_Init(&pn532_config) == PN532_STATUS_OK) {
           system_error &= ~0x02;
           system_status |= 0x02;
           DebugPrint("NFC recovery successful\r\n");
@@ -809,24 +841,107 @@ void StartSensorTask(void *argument)
         }
         
         if (read_status == BNO055_STATUS_OK) {
+            // static states
+            static float v = 0.0f;                 // vận tốc (m/s)
+            static float last_a_forward = 0.0f;    // a_{k-1}
+            static float a_forward_lp = 0.0f;      // low-pass state (EMA)
+            static uint32_t last_tick = 0;
+            static MAFilter_t accFilter;
+            static uint8_t zh_counter = 0;
+
+            MAFilter_Init(&accFilter);
+
           BNO055_Vector_t *accel = BNO055_GetAccel(&hbno055);
+          BNO055_Vector_t *lin_accel = BNO055_GetLinearAccel(&hbno055);
+          BNO055_Quaternion_t *quat = BNO055_GetQuaternion(&hbno055);
+          BNO055_Euler_t *euler = BNO055_GetEuler(&hbno055);
           BNO055_Vector_t *gyro = BNO055_GetGyro(&hbno055);
-          BNO055_Vector_t *mag = BNO055_GetMag(&hbno055);
-          
-          // Debug output to verify sensor task is running (convert to int for printf)
-          DebugPrint("IMU Data - Accel: %d,%d,%d | Gyro: %d,%d,%d | Mag: %d,%d,%d\r\n",
-                     (accel->x), (accel->y), (accel->z), 
-                     (gyro->x), (gyro->y), (gyro->z),
-                     (mag->x), (mag->y), (mag->z));
-          
-          // Update Modbus registers
-          // Modbus_SetRegisterValue(&hmodbus, REG_ACCEL_X, (uint16_t)accel->x);
-          // Modbus_SetRegisterValue(&hmodbus, REG_ACCEL_Y, (uint16_t)accel->y);
-          // Modbus_SetRegisterValue(&hmodbus, REG_ACCEL_Z, (uint16_t)accel->z);
-          
-          // Modbus_SetRegisterValue(&hmodbus, REG_GYRO_X, (uint16_t)gyro->x);
-          // Modbus_SetRegisterValue(&hmodbus, REG_GYRO_Y, (uint16_t)gyro->y);
-          // Modbus_SetRegisterValue(&hmodbus, REG_GYRO_Z, (uint16_t)gyro->z);
+
+          DebugPrint("========IMU Data========\r\n");
+          DebugPrint("Acceleration: %.2f, %.2f, %.2f\r\n", accel->x * 0.01f, accel->y * 0.01f, accel->z * 0.01f);
+          DebugPrint("Linear Acceleration: %.2f, %.2f, %.2f m/s*s\r\n", lin_accel->x * 0.01f, lin_accel->y * 0.01f, lin_accel->z * 0.01f);
+          DebugPrint("Quaternion: %.2f, %.2f, %.2f, %.2f\r\n", quat->w, quat->x, quat->y, quat->z);
+          DebugPrint("Euler: %.2f, %.2f, %.2f\r\n", euler->heading, euler->roll, euler->pitch);
+          DebugPrint("Gyro: %.2f, %.2f, %.2f\r\n", gyro->x * 0.01f, gyro->y * 0.01f, gyro->z * 0.01f);
+
+          if (!lin_accel || !quat || !euler || !gyro) return;
+
+          uint32_t now = HAL_GetTick();
+          float dt = (last_tick == 0) ? SAMPLE_DT_DEFAULT : (now - last_tick) / 1000.0f;
+          if (dt <= 0) dt = SAMPLE_DT_DEFAULT;
+          last_tick = now;
+
+          // quaternion -> rotation matrix
+          float w = quat->w, x = quat->x, y = quat->y, z = quat->z;
+          float norm = sqrtf(w*w + x*x + y*y + z*z);
+          if (norm < 1e-6f) return;
+          w/=norm; x/=norm; y/=norm; z/=norm;
+
+          float R00 = 1 - 2*y*y - 2*z*z;
+          float R01 = 2*x*y - 2*z*w;
+          float R10 = 2*x*y + 2*z*w;
+          float R11 = 1 - 2*x*x - 2*z*z;
+
+          // scale LSB -> m/s^2 (BNO in m/s2 mode => 1 LSB = 0.01 m/s^2)
+          float ax = lin_accel->x * 0.01f;
+          float ay = lin_accel->z * 0.01f;
+          // world frame (only x,y needed)
+          float ax_w = R00*ax + R01*ay;
+          float ay_w = R10*ax + R11*ay;
+
+          // heading in radians
+          float heading_rad = euler->heading * PI_F / 180.0f;
+
+          // projection onto forward axis (vehicle forward = heading)
+          float a_forward = ax_w * cosf(heading_rad) + ay_w * sinf(heading_rad);
+          float a_forward_filtered = MAFilter_Update(&accFilter, a_forward);
+
+
+          // ----- EMA low-pass for a_forward -----
+          // alpha = dt / (tau + dt), tau = 1/(2*pi*fc)
+          float tau = 1.0f / (2.0f * PI_F * FC_CUTOFF);
+          float alpha = dt / (tau + dt);
+          // initialize lp on first run
+          static bool lp_init = false;
+          if (!lp_init) {
+              a_forward_lp = a_forward_filtered;
+              lp_init = true;
+          } else {
+              a_forward_lp = alpha * a_forward_filtered + (1.0f - alpha) * a_forward_lp;
+          }
+
+          // ----- trapezoidal integration -----
+          float v_delta = 0.5f * (a_forward_lp + last_a_forward) * dt;
+          v += v_delta;
+          last_a_forward = a_forward_lp;
+
+          // ----- ZUPT: nếu gần như đứng yên (acceleration nhỏ và gyro nhỏ) -----
+          // thresholds có thể tinh chỉnh
+          const float ACC_THRESHOLD = 0.05f;   // m/s^2
+          const float GYRO_THRESHOLD = 2.0f;   // deg/s (raw unit from BNO maybe LSB -> cần tùy)
+          // Note: gyro in your code is raw LSB; you may convert to deg/s if needed.
+          if (fabsf(a_forward_lp) < ACC_THRESHOLD &&
+              fabsf(gyro->x) < GYRO_THRESHOLD && fabsf(gyro->y) < GYRO_THRESHOLD && fabsf(gyro->z) < GYRO_THRESHOLD) {
+              // optionally require this condition persist N cycles before zeroing to avoid flicker
+              zh_counter++;
+              if (zh_counter >= 3) { // 3 cycles stable -> zero velocity
+                  v = 0.0f;
+              }
+          } else {
+              zh_counter = 0;
+          }
+
+          // optional: limit v to reasonable bounds (e.g., -50..+50 m/s)
+          if (v > 50.0f) v = 50.0f;
+          if (v < -50.0f) v = -50.0f;
+
+          // Debug print
+          DebugPrint("a_fwd: %.3f (lp %.3f) dt: %.3f => v: %.3f m/s | heading: %.2f\r\n",
+                    a_forward, a_forward_lp, dt, v, euler->heading);
+          // Update Modbus registers nếu cần
+          // Modbus_SetRegisterValue(&hmodbus, REG_VELOCITY_X, (uint16_t)(vx * 1000)); // mm/s
+          // Modbus_SetRegisterValue(&hmodbus, REG_VELOCITY_Y, (uint16_t)(vy * 1000));
+          // Modbus_SetRegisterValue(&hmodbus, REG_ORIENTATION, (uint16_t)orientation_z);
           
           // Modbus_SetRegisterValue(&hmodbus, REG_MAG_X, (uint16_t)mag->x);
           // Modbus_SetRegisterValue(&hmodbus, REG_MAG_Y, (uint16_t)mag->y);
@@ -898,7 +1013,7 @@ void StartSensorTask(void *argument)
     }
     
     // Read sensor data every 100ms
-    osDelay(100);
+    osDelay(20);
   }
   /* USER CODE END StartSensorTask */
 }
@@ -918,75 +1033,140 @@ void StartNfcTask(void *argument)
   
   DebugPrint("NFC Task Started\r\n");
   
+  // Set passive activation retries for better card detection
+  if (sensors_initialized && (system_status & 0x02)) {
+    setPassiveActivationRetries(0xFF);
+    DebugPrint("PN532 configured for card detection\r\n");
+  }
+  
   /* Infinite loop */
   for(;;)
   {
-    // Debug every 10th iteration to avoid spam
+    // Debug every 20th iteration to avoid spam
     static uint32_t nfc_debug_counter = 0;
-    if (++nfc_debug_counter >= 10) {
-      DebugPrint("NFC Task running - sensors_initialized: %d, system_status: 0x%02X\r\n", 
+    if (++nfc_debug_counter >= 20) {
+      DebugPrint("NFC Task running - sensors_initialized: %d, system_status: 0x%02X\r\n",
                  sensors_initialized, system_status);
       nfc_debug_counter = 0;
     }
     
     if (sensors_initialized && (system_status & 0x02)) {
-      // PN532 is available, read real data
+      // PN532 is available, try to read RFID card
       if (osMutexAcquire(dataMutexHandle, 100) == osOK) {
-        PN532_Status_t status = PN532_ReadCard(&hpn532);
         
-        if (status == PN532_STATUS_OK && PN532_IsCardPresent(&hpn532)) {
-          // Card detected
-          // uint8_t *uid = PN532_GetCardUID(&hpn532);
-          // uint8_t card_type = PN532_GetCardType(&hpn532);
+        uint8_t uid[7];
+        uint8_t uid_length = 0;
+        
+        // Try to read passive target (RFID card)
+        bool card_detected = readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uid_length, 100);
+        
+        if (card_detected && uid_length > 0) {
+          // Card detected successfully
+          DebugPrint("========NFC Card Detected========\r\n");
+          DebugPrint("UID Length: %d bytes\r\n", uid_length);
+          DebugPrint("UID: ");
+          for (uint8_t i = 0; i < uid_length; i++) {
+            DebugPrint("%02X ", uid[i]);
+          }
+          DebugPrint("\r\n");
           
-          // uint16_t uid_low = (uid[1] << 8) | uid[0];
-          // uint16_t uid_high = (uid[3] << 8) | uid[2];
+          // Calculate 32-bit UID for comparison (use first 4 bytes)
+          uint32_t current_uid = 0;
+          for (uint8_t i = 0; i < uid_length && i < 4; i++) {
+            current_uid |= ((uint32_t)uid[i]) << (i * 8);
+          }
           
-          // Modbus_SetRegisterValue(&hmodbus, REG_PN532_DATA_LOW, uid_low);
-          // Modbus_SetRegisterValue(&hmodbus, REG_PN532_DATA_HIGH, uid_high);
-          // Modbus_SetRegisterValue(&hmodbus, REG_PN532_CARD_TYPE, card_type);
-          // Modbus_SetRegisterValue(&hmodbus, REG_PN532_STATUS, 0x01); // Card present
-          // Modbus_SetRegisterValue(&hmodbus, REG_PN532_ERROR, 0x00);
-          // Modbus_SetRegisterValue(&hmodbus, REG_PN532_CARD_UID, uid_low);
+          // Check if this is a new card
+          if (current_uid != nfc_last_card_uid || !nfc_card_present) {
+            DebugPrint("New card detected! UID: 0x%08lX\r\n", current_uid);
+            
+            // Update card information
+            memcpy(nfc_card_uid, uid, uid_length);
+            nfc_card_uid_length = uid_length;
+            nfc_card_present = true;
+            nfc_last_card_uid = current_uid;
+            
+            // Determine card type based on UID length and other characteristics
+            if (uid_length == 4) {
+              nfc_card_type = 1; // Mifare Classic 1K/4K or compatible
+              DebugPrint("Card Type: Mifare Classic (4-byte UID)\r\n");
+            } else if (uid_length == 7) {
+              nfc_card_type = 2; // Mifare Ultralight or 7-byte UID card
+              DebugPrint("Card Type: Mifare Ultralight (7-byte UID)\r\n");
+            } else {
+              nfc_card_type = 0; // Unknown
+              DebugPrint("Card Type: Unknown (%d-byte UID)\r\n", uid_length);
+            }
+            
+            // Update Modbus registers if needed
+            // uint16_t uid_low = (uid[1] << 8) | uid[0];
+            // uint16_t uid_high = (uid_length > 2) ? ((uid[3] << 8) | uid[2]) : 0;
+            // Modbus_SetRegisterValue(&hmodbus, REG_PN532_DATA_LOW, uid_low);
+            // Modbus_SetRegisterValue(&hmodbus, REG_PN532_DATA_HIGH, uid_high);
+            // Modbus_SetRegisterValue(&hmodbus, REG_PN532_CARD_TYPE, nfc_card_type);
+            // Modbus_SetRegisterValue(&hmodbus, REG_PN532_STATUS, 0x01); // Card present
+            // Modbus_SetRegisterValue(&hmodbus, REG_PN532_ERROR, 0x00);
+            
+            // Signal that new NFC data is available
+            osEventFlagsSet(systemEventsHandle, EVENT_NFC_DATA_READY);
+          }
           
           system_error &= ~0x02; // Clear NFC error
-          osEventFlagsSet(systemEventsHandle, EVENT_NFC_DATA_READY);
           
-        } else if (status == PN532_STATUS_NO_CARD) {
-          // No card detected
-          // Modbus_SetRegisterValue(&hmodbus, REG_PN532_DATA_LOW, 0x0000);
-          // Modbus_SetRegisterValue(&hmodbus, REG_PN532_DATA_HIGH, 0x0000);
-          // Modbus_SetRegisterValue(&hmodbus, REG_PN532_CARD_TYPE, 0x00);
-          // Modbus_SetRegisterValue(&hmodbus, REG_PN532_STATUS, 0x00);
-          // Modbus_SetRegisterValue(&hmodbus, REG_PN532_ERROR, 0x00);
-          // Modbus_SetRegisterValue(&hmodbus, REG_PN532_CARD_UID, 0x0000);
-          
-          system_error &= ~0x02; // Clear NFC error
         } else {
-          // Communication error
-          system_error |= 0x02;
-          // uint8_t error_code = PN532_GetErrorCode(&hpn532);
-          // Modbus_SetRegisterValue(&hmodbus, REG_PN532_STATUS, 0x00);
-          // Modbus_SetRegisterValue(&hmodbus, REG_PN532_ERROR, error_code);
-          osEventFlagsSet(systemEventsHandle, EVENT_SYSTEM_ERROR);
+          // No card detected or read error
+          if (nfc_card_present) {
+            DebugPrint("Card removed\r\n");
+            
+            // Clear card information
+            nfc_card_present = false;
+            nfc_card_uid_length = 0;
+            nfc_card_type = 0;
+            nfc_last_card_uid = 0;
+            memset(nfc_card_uid, 0, sizeof(nfc_card_uid));
+            
+            // Update Modbus registers
+            // Modbus_SetRegisterValue(&hmodbus, REG_PN532_DATA_LOW, 0x0000);
+            // Modbus_SetRegisterValue(&hmodbus, REG_PN532_DATA_HIGH, 0x0000);
+            // Modbus_SetRegisterValue(&hmodbus, REG_PN532_CARD_TYPE, 0x00);
+            // Modbus_SetRegisterValue(&hmodbus, REG_PN532_STATUS, 0x00); // No card
+            // Modbus_SetRegisterValue(&hmodbus, REG_PN532_ERROR, 0x00);
+          }
+          
+          system_error &= ~0x02; // Clear NFC error (no card is not an error)
         }
+        
         osMutexRelease(dataMutexHandle);
       }
     } else {
       // PN532 not available, provide default data
+      static uint32_t pn532_debug_counter = 0;
+      if (++pn532_debug_counter >= 50) { // Less frequent for this message
+        DebugPrint("PN532 not available - sensors_initialized: %d, system_status: 0x%02X\r\n", 
+                   sensors_initialized, system_status);
+        pn532_debug_counter = 0;
+      }
+      
       if (osMutexAcquire(dataMutexHandle, 10) == osOK) {
+        // Clear card data when PN532 is not available
+        nfc_card_present = false;
+        nfc_card_uid_length = 0;
+        nfc_card_type = 0;
+        nfc_last_card_uid = 0;
+        
+        // Update Modbus registers
         // Modbus_SetRegisterValue(&hmodbus, REG_PN532_DATA_LOW, 0x0000);
         // Modbus_SetRegisterValue(&hmodbus, REG_PN532_DATA_HIGH, 0x0000);
         // Modbus_SetRegisterValue(&hmodbus, REG_PN532_CARD_TYPE, 0x00);
         // Modbus_SetRegisterValue(&hmodbus, REG_PN532_STATUS, 0x00);
         // Modbus_SetRegisterValue(&hmodbus, REG_PN532_ERROR, 0xFF); // Sensor not connected
-        // Modbus_SetRegisterValue(&hmodbus, REG_PN532_CARD_UID, 0x0000);
+        
         osMutexRelease(dataMutexHandle);
       }
     }
     
-    // Read NFC data every 500ms
-    osDelay(500);
+    // Read NFC data every 300ms (faster response for card detection)
+    osDelay(300);
   }
   /* USER CODE END StartNfcTask */
 }

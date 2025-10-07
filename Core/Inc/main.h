@@ -33,6 +33,7 @@ extern "C" {
 /* USER CODE BEGIN Includes */
 #include "pn532.h"
 #include "bno055.h"
+#include "filter.h"
 // #include "modbus_slave.h"
 // #include "modbus_regs.h"
 #include <stdio.h>
@@ -50,7 +51,10 @@ extern "C" {
 
 /* Exported macro ------------------------------------------------------------*/
 /* USER CODE BEGIN EM */
+#define PI_F 3.14159265f
 
+static const float SAMPLE_DT_DEFAULT = 0.02f; // mặc định 50Hz (update dựa trên HAL_GetTick)
+static const float FC_CUTOFF = 3.0f;
 /* USER CODE END EM */
 
 /* Exported functions prototypes ---------------------------------------------*/
@@ -65,6 +69,20 @@ extern UART_HandleTypeDef huart2;
 /* Private defines -----------------------------------------------------------*/
 #define LED_Pin GPIO_PIN_13
 #define LED_GPIO_Port GPIOC
+#define LED_MB_Pin GPIO_PIN_14
+#define LED_MB_GPIO_Port GPIOC
+#define LED_FAULT_Pin GPIO_PIN_15
+#define LED_FAULT_GPIO_Port GPIOC
+#define IN_4_Pin GPIO_PIN_4
+#define IN_4_GPIO_Port GPIOA
+#define IN_3_Pin GPIO_PIN_5
+#define IN_3_GPIO_Port GPIOA
+#define IN_2_Pin GPIO_PIN_6
+#define IN_2_GPIO_Port GPIOA
+#define IN_1_Pin GPIO_PIN_7
+#define IN_1_GPIO_Port GPIOA
+#define RL_FAULT_Pin GPIO_PIN_8
+#define RL_FAULT_GPIO_Port GPIOA
 
 /* USER CODE BEGIN Private defines */
 
