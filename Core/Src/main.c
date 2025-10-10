@@ -67,14 +67,14 @@ osThreadId_t sensorTaskHandle;
 const osThreadAttr_t sensorTask_attributes = {
   .name = "sensorTask",
   .stack_size = 128 * 8,
-  .priority = (osPriority_t) osPriorityNormal,
+  .priority = (osPriority_t) osPriorityBelowNormal,
 };
 /* Definitions for nfcTask */
 osThreadId_t nfcTaskHandle;
 const osThreadAttr_t nfcTask_attributes = {
   .name = "nfcTask",
-  .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityNormal,
+  .stack_size = 128 * 4, // Giảm về 512 bytes
+  .priority = (osPriority_t) osPriorityLow, // Thử priority thấp hơn
 };
 /* USER CODE BEGIN PV */
 // Module handles
@@ -146,6 +146,7 @@ void DebugPrint(const char* format, ...);
 void I2C_BasicTest(void);
 void I2C_Scanner(void);
 void DebugDumpHex(const char* label, uint8_t* data, uint8_t len);
+void CheckMemoryUsage(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -193,7 +194,6 @@ int main(void)
   DebugPrint("DAL Module Started\r\n");
   DebugPrint("Firmware Version: v1.01\r\n");
   DebugPrint("Hardware Version: v1.01\r\n");
-  
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -227,9 +227,6 @@ int main(void)
   /* creation of sensorTask */
   sensorTaskHandle = osThreadNew(StartSensorTask, NULL, &sensorTask_attributes);
 
-  /* creation of nfcTask */
-  nfcTaskHandle = osThreadNew(StartNfcTask, NULL, &nfcTask_attributes);
-
   /* USER CODE BEGIN RTOS_THREADS */
   /* USER CODE END RTOS_THREADS */
 
@@ -238,6 +235,12 @@ int main(void)
   systemEventsHandle = osEventFlagsNew(&systemEvents_attributes);
   /* USER CODE END RTOS_EVENTS */
 
+  /* creation of nfcTask - tạo sau khi có event flags */
+  nfcTaskHandle = osThreadNew(StartNfcTask, NULL, &nfcTask_attributes);
+  if (nfcTaskHandle == NULL) {
+	  DebugPrint("Failed to create nfcTask\r\n");
+  }
+  
   /* Start scheduler */
   osKernelStart();
 
@@ -440,8 +443,6 @@ void SystemInit_Modules(void)
     system_error = 0x00;
     
     // Scan I2C bus for devices
-    DebugPrint("Scanning I2C bus...\r\n");
-
     I2C_Scanner();
     
     // Initialize BNO055 IMU with retry mechanism
@@ -651,18 +652,6 @@ void I2C_Scanner(void)
             }
         }
     }
-    
-    if (devices_found == 0) {
-        DebugPrint("No I2C devices found! Possible issues:\r\n");
-        DebugPrint("  - Check SDA/SCL connections (PB7/PB6)\r\n");
-        DebugPrint("  - Check pull-up resistors (4.7kΩ)\r\n");
-        DebugPrint("  - Check power supply to sensors (3.3V)\r\n");
-        DebugPrint("  - Verify I2C clock speed (currently %lu Hz)\r\n", hi2c1.Init.ClockSpeed);
-        DebugPrint("  - BNO055: Check COM3 pin for address selection\r\n");
-        DebugPrint("  - PN532: Check if in I2C mode (not SPI/UART)\r\n");
-    } else {
-        DebugPrint("I2C scan completed. Found %d device(s)\r\n", devices_found);
-    }
 }
 
 /* USER CODE END 4 */
@@ -677,70 +666,49 @@ void I2C_Scanner(void)
 void StartDefaultTask(void *argument)
 {
   /* USER CODE BEGIN 5 */
+  DebugPrint("------Default Task Started------\r\n");
   
   // Signal that initialization is complete
   osEventFlagsSet(systemEventsHandle, EVENT_SENSOR_DATA_READY);
+
+  uint32_t recovery_cooldown = 0;
   
   /* Infinite loop */
   for(;;)
   {
-    // Monitor system status and handle errors
     uint32_t events = osEventFlagsWait(systemEventsHandle, 
                                       EVENT_SYSTEM_ERROR, 
                                       osFlagsWaitAny, 
                                       1000);
     
     if (events & EVENT_SYSTEM_ERROR) {
-      DebugPrint("System error detected, attempting recovery...\r\n");
-      
-      // Clear error flag
-      osEventFlagsClear(systemEventsHandle, EVENT_SYSTEM_ERROR);
-      
-      // Attempt to reinitialize failed modules (only if not hardware issue)
-      static uint32_t imu_recovery_attempts = 0;
-      
-      if (system_error & 0x01) {
-        if (imu_recovery_attempts < 3) { // Limit recovery attempts
-          imu_recovery_attempts++;
-          DebugPrint("IMU recovery attempt %lu/3\r\n", imu_recovery_attempts);
-          
-          // Reinitialize IMU
-          if (BNO055_Init(&hbno055, &hi2c1) == BNO055_STATUS_OK) {
-            system_error &= ~0x01;
-            system_status |= 0x01;
-            imu_recovery_attempts = 0; // Reset counter on success
-            DebugPrint("IMU recovery successful\r\n");
-          } else {
-            DebugPrint("IMU recovery failed - attempt %lu\r\n", imu_recovery_attempts);
-            if (imu_recovery_attempts >= 3) {
-              DebugPrint("IMU recovery failed - giving up after 3 attempts\r\n");
-              system_error &= ~0x01; // Clear error to stop recovery loop
-              system_status &= ~0x01; // Mark as unavailable
-            }
-          }
+        // Check cooldown
+        if (HAL_GetTick() - recovery_cooldown < 10000) { // 10 second cooldown
+            osEventFlagsClear(systemEventsHandle, EVENT_SYSTEM_ERROR);
+            osDelay(1000);
+            continue;
         }
-      }
-      
-      if (system_error & 0x02) {
-        // Reinitialize NFC
-        if (PN532_Init(&pn532_config) == PN532_STATUS_OK) {
-          system_error &= ~0x02;
-          system_status |= 0x02;
-          DebugPrint("NFC recovery successful\r\n");
-        } else {
-          DebugPrint("NFC recovery failed - hardware issue\r\n");
-        }
-      }
-      
-      // If hardware issues persist, reduce recovery attempts
-      if ((system_error & 0x03) == 0x03) {
-        DebugPrint("Hardware sensors not available - running in Modbus-only mode\r\n");
-        // Don't attempt recovery for hardware issues
+
+        DebugPrint("System error detected, attempting recovery...\r\n");
+        recovery_cooldown = HAL_GetTick();
+
+        // Clear error flag
         osEventFlagsClear(systemEventsHandle, EVENT_SYSTEM_ERROR);
-      }
+
+        // Try to reinitialize modules
+        if (system_error & 0x01) {
+            DebugPrint("Resetting IMU error flag\r\n");
+            system_error &= ~0x01;
+        }
+
+        if (system_error & 0x02) {
+            DebugPrint("Resetting NFC error flag\r\n");
+            system_error &= ~0x02;
+        }
     }
+
     HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
-    osDelay(100);
+    osDelay(500); // Slower blink
   }
   /* USER CODE END 5 */
 }
@@ -823,8 +791,11 @@ void StartSensorTask(void *argument)
   // Wait for system initialization
   osEventFlagsWait(systemEventsHandle, EVENT_SENSOR_DATA_READY, osFlagsWaitAny, osWaitForever);
   
-  DebugPrint("Sensor Task Started\r\n");
+  DebugPrint("------Sensor Task Started------\n");
   
+  uint32_t consecutive_failures = 0;
+  const uint32_t MAX_CONSECUTIVE_FAILURES = 5;
+
   /* Infinite loop */
   for(;;)
   {
@@ -832,13 +803,6 @@ void StartSensorTask(void *argument)
       // BNO055 is available, read real data
       if (osMutexAcquire(dataMutexHandle, 100) == osOK) {
         BNO055_Status_t read_status = BNO055_ReadAllSensors(&hbno055);
-        
-        // Debug every 10th read to avoid spam
-        static uint32_t read_debug_counter = 0;
-        if (++read_debug_counter >= 10) {
-          DebugPrint("BNO055_ReadAllSensors status: %d\r\n", read_status);
-          read_debug_counter = 0;
-        }
         
         if (read_status == BNO055_STATUS_OK) {
             // static states
@@ -851,18 +815,18 @@ void StartSensorTask(void *argument)
 
             MAFilter_Init(&accFilter);
 
-          BNO055_Vector_t *accel = BNO055_GetAccel(&hbno055);
-          BNO055_Vector_t *lin_accel = BNO055_GetLinearAccel(&hbno055);
-          BNO055_Quaternion_t *quat = BNO055_GetQuaternion(&hbno055);
-          BNO055_Euler_t *euler = BNO055_GetEuler(&hbno055);
-          BNO055_Vector_t *gyro = BNO055_GetGyro(&hbno055);
+//          BNO055_Vector_t *accel = BNO055_GetAccel(&hbno055);
+			BNO055_Vector_t *lin_accel = BNO055_GetLinearAccel(&hbno055);
+			BNO055_Quaternion_t *quat = BNO055_GetQuaternion(&hbno055);
+			BNO055_Euler_t *euler = BNO055_GetEuler(&hbno055);
+			BNO055_Vector_t *gyro = BNO055_GetGyro(&hbno055);
 
-          DebugPrint("========IMU Data========\r\n");
-          DebugPrint("Acceleration: %.2f, %.2f, %.2f\r\n", accel->x * 0.01f, accel->y * 0.01f, accel->z * 0.01f);
-          DebugPrint("Linear Acceleration: %.2f, %.2f, %.2f m/s*s\r\n", lin_accel->x * 0.01f, lin_accel->y * 0.01f, lin_accel->z * 0.01f);
-          DebugPrint("Quaternion: %.2f, %.2f, %.2f, %.2f\r\n", quat->w, quat->x, quat->y, quat->z);
-          DebugPrint("Euler: %.2f, %.2f, %.2f\r\n", euler->heading, euler->roll, euler->pitch);
-          DebugPrint("Gyro: %.2f, %.2f, %.2f\r\n", gyro->x * 0.01f, gyro->y * 0.01f, gyro->z * 0.01f);
+//          DebugPrint("========IMU Data========\r\n");
+//          DebugPrint("Acceleration: %.2f, %.2f, %.2f\r\n", accel->x * 0.01f, accel->y * 0.01f, accel->z * 0.01f);
+//          DebugPrint("Linear Acceleration: %.2f, %.2f, %.2f m/s*s\r\n", lin_accel->x * 0.01f, lin_accel->y * 0.01f, lin_accel->z * 0.01f);
+//          DebugPrint("Quaternion: %.2f, %.2f, %.2f, %.2f\r\n", quat->w, quat->x, quat->y, quat->z);
+//          DebugPrint("Euler: %.2f, %.2f, %.2f\r\n", euler->heading, euler->roll, euler->pitch);
+//          DebugPrint("Gyro: %.2f, %.2f, %.2f\r\n", gyro->x * 0.01f, gyro->y * 0.01f, gyro->z * 0.01f);
 
           if (!lin_accel || !quat || !euler || !gyro) return;
 
@@ -936,8 +900,9 @@ void StartSensorTask(void *argument)
           if (v < -50.0f) v = -50.0f;
 
           // Debug print
-          DebugPrint("a_fwd: %.3f (lp %.3f) dt: %.3f => v: %.3f m/s | heading: %.2f\r\n",
-                    a_forward, a_forward_lp, dt, v, euler->heading);
+//          DebugPrint("a_fwd: %.3f (lp %.3f) dt: %.3f => v: %.3f m/s | heading: %.2f\r\n",
+//                    a_forward, a_forward_lp, dt, v, euler->heading);
+//          DebugPrint("v: %.3f m/s | heading: %.2f\r\n", v, euler->heading);
           // Update Modbus registers nếu cần
           // Modbus_SetRegisterValue(&hmodbus, REG_VELOCITY_X, (uint16_t)(vx * 1000)); // mm/s
           // Modbus_SetRegisterValue(&hmodbus, REG_VELOCITY_Y, (uint16_t)(vy * 1000));
@@ -961,59 +926,25 @@ void StartSensorTask(void *argument)
           imu_fail_counter = 0;
           
           system_error &= ~0x01; // Clear IMU error
+          consecutive_failures = 0;
         } else {
-          DebugPrint("IMU read failed! Status: %d\r\n", read_status);
-          
-          // Check what specifically failed
-          uint8_t sys_stat, sys_err;
-          if (BNO055_ReadSystemStatus(&hbno055, &sys_stat, &sys_err) == BNO055_STATUS_OK) {
-              DebugPrint("  System Status: 0x%02X, System Error: 0x%02X\r\n", sys_stat, sys_err);
-          }
-          
-          // Check calibration status
-          BNO055_CalibStatus_t *calib = BNO055_GetCalibStatus(&hbno055);
-          DebugPrint("  Calibration - Sys:%d Gyro:%d Accel:%d Mag:%d\r\n", 
-                     calib->system, calib->gyro, calib->accel, calib->mag);
-          
-          // Only trigger system error after multiple consecutive failures
-          extern uint32_t imu_fail_counter; // Use extern
-          imu_fail_counter++;
-          
-          if (imu_fail_counter >= 10) { // Trigger error after 10 consecutive failures
-            system_error |= 0x01; // Set IMU error
-            // Modbus_SetRegisterValue(&hmodbus, REG_IMU_ERROR, 0x01);
-            osEventFlagsSet(systemEventsHandle, EVENT_SYSTEM_ERROR);
-            imu_fail_counter = 0; // Reset counter
-          }
+        	consecutive_failures++;
+        	DebugPrint("IMU read failed! Status: %d, Consecutive failures: %lu\r\n", read_status, consecutive_failures);
+
+        	// Chỉ báo lỗi hệ thống sau nhiều lần fail liên tiếp
+        	if (consecutive_failures >= MAX_CONSECUTIVE_FAILURES) {
+				system_error |= 0x01; // Set IMU error
+				osEventFlagsSet(systemEventsHandle, EVENT_SYSTEM_ERROR);
+				consecutive_failures = 0; // Reset counter
+        	}
         }
         osMutexRelease(dataMutexHandle);
       }
     } else {
-      // BNO055 not available, provide dummy/default data
-      static uint32_t bno_debug_counter = 0;
-      if (++bno_debug_counter >= 50) { // Less frequent for this message
-        DebugPrint("BNO055 not available - sensors_initialized: %d, system_status: 0x%02X\r\n", 
-                   sensors_initialized, system_status);
-        bno_debug_counter = 0;
-      }
-      if (osMutexAcquire(dataMutexHandle, 10) == osOK) {
-        // Modbus_SetRegisterValue(&hmodbus, REG_ACCEL_X, 0x0000);
-        // Modbus_SetRegisterValue(&hmodbus, REG_ACCEL_Y, 0x0000);
-        // Modbus_SetRegisterValue(&hmodbus, REG_ACCEL_Z, 0x0000);
-        // Modbus_SetRegisterValue(&hmodbus, REG_GYRO_X, 0x0000);
-        // Modbus_SetRegisterValue(&hmodbus, REG_GYRO_Y, 0x0000);
-        // Modbus_SetRegisterValue(&hmodbus, REG_GYRO_Z, 0x0000);
-        // Modbus_SetRegisterValue(&hmodbus, REG_MAG_X, 0x0000);
-        // Modbus_SetRegisterValue(&hmodbus, REG_MAG_Y, 0x0000);
-        // Modbus_SetRegisterValue(&hmodbus, REG_MAG_Z, 0x0000);
-        // Modbus_SetRegisterValue(&hmodbus, REG_IMU_STATUS, 0x00);
-        // Modbus_SetRegisterValue(&hmodbus, REG_IMU_ERROR, 0xFF); // Sensor not connected
-        osMutexRelease(dataMutexHandle);
-      }
+    	osDelay(100);
     }
-    
-    // Read sensor data every 100ms
-    osDelay(20);
+    // Read sensor data every 50ms
+    osDelay(50);
   }
   /* USER CODE END StartSensorTask */
 }
@@ -1028,28 +959,25 @@ void StartSensorTask(void *argument)
 void StartNfcTask(void *argument)
 {
   /* USER CODE BEGIN StartNfcTask */
-  // Wait for system initialization
-  osEventFlagsWait(systemEventsHandle, EVENT_SENSOR_DATA_READY, osFlagsWaitAny, osWaitForever);
-  
-  DebugPrint("NFC Task Started\r\n");
-  
-  // Set passive activation retries for better card detection
-  if (sensors_initialized && (system_status & 0x02)) {
-    setPassiveActivationRetries(0xFF);
-    DebugPrint("PN532 configured for card detection\r\n");
-  }
-  
+	DebugPrint("------NFC Task Starting------\r\n");
+  // Wait for system initialization with timeout
+  osEventFlagsWait(systemEventsHandle, EVENT_SENSOR_DATA_READY, osFlagsWaitAny, 10000);
+
+  if (setPassiveActivationRetries(0xFF)) {
+        DebugPrint("PN532 passive retries configured\r\n");
+    } else {
+        DebugPrint("Failed to configure passive retries\r\n");
+    }
+
+    // SAMConfig
+    if (SAMConfig()) {
+        DebugPrint("PN532 SAMConfig successful\r\n");
+    } else {
+        DebugPrint("PN532 SAMConfig failed\r\n");
+    }
   /* Infinite loop */
   for(;;)
   {
-    // Debug every 20th iteration to avoid spam
-    static uint32_t nfc_debug_counter = 0;
-    if (++nfc_debug_counter >= 20) {
-      DebugPrint("NFC Task running - sensors_initialized: %d, system_status: 0x%02X\r\n",
-                 sensors_initialized, system_status);
-      nfc_debug_counter = 0;
-    }
-    
     if (sensors_initialized && (system_status & 0x02)) {
       // PN532 is available, try to read RFID card
       if (osMutexAcquire(dataMutexHandle, 100) == osOK) {
@@ -1057,13 +985,11 @@ void StartNfcTask(void *argument)
         uint8_t uid[7];
         uint8_t uid_length = 0;
         
-        // Try to read passive target (RFID card)
-        bool card_detected = readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uid_length, 100);
+        bool card_detected = readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uid_length, 2000);
         
         if (card_detected && uid_length > 0) {
           // Card detected successfully
           DebugPrint("========NFC Card Detected========\r\n");
-          DebugPrint("UID Length: %d bytes\r\n", uid_length);
           DebugPrint("UID: ");
           for (uint8_t i = 0; i < uid_length; i++) {
             DebugPrint("%02X ", uid[i]);
@@ -1164,9 +1090,8 @@ void StartNfcTask(void *argument)
         osMutexRelease(dataMutexHandle);
       }
     }
-    
-    // Read NFC data every 300ms (faster response for card detection)
-    osDelay(300);
+    // Read NFC data every 500ms (faster response for card detection)
+    osDelay(500);
   }
   /* USER CODE END StartNfcTask */
 }

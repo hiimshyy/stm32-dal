@@ -67,14 +67,18 @@
       HAL_Delay(650);
      
      // Wait for chip to be ready
-     uint8_t sys_stat, sys_err;
-     uint32_t timeout = HAL_GetTick() + 1000;
-     do {
-         if (BNO055_ReadSystemStatus(hbno055, &sys_stat, &sys_err) != BNO055_STATUS_OK) {
-             return BNO055_STATUS_ERROR;
-         }
-         HAL_Delay(10);
-     } while (sys_stat != 0x01 && HAL_GetTick() < timeout);
+      uint8_t sys_stat, sys_err;
+      uint32_t timeout = HAL_GetTick() + 2000; // 2 second timeout
+      do {
+          if (BNO055_ReadSystemStatus(hbno055, &sys_stat, &sys_err) != BNO055_STATUS_OK) {
+              hbno055->status = BNO055_STATUS_COMM_ERROR;
+              return BNO055_STATUS_COMM_ERROR;
+          }
+          if (sys_stat == 0x05 || sys_stat == 0x01) { // 0x05 = sensor fusion running, 0x01 = system ready
+              break; // Accept these statuses as ready
+          }
+          HAL_Delay(10);
+      } while (HAL_GetTick() < timeout);
      
      if (sys_stat != 0x01) {
          hbno055->status = BNO055_STATUS_TIMEOUT;

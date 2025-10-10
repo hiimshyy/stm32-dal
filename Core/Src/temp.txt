@@ -9,8 +9,8 @@
 #include <string.h>
 
 #define PN532_TIMEOUT (100) ///< Default timeout for PN532 communication
-//#define PN532DEBUG		1
-//#define MIFAREDEBUG 	1
+#define PN532DEBUG		1///< Uncomment to enable debug output
+#define MIFAREDEBUG 	1  ///< Uncomment to enable Mifare debug output
 
 uint8_t pn532ack[] = {0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00}; ///< ACK message from PN532
 uint8_t pn532response_firmwarevers[] = {0x00, 0x00, 0xFF, 0x06, 0xFA, 0xD5}; ///< Expected firmware version message from PN532
@@ -27,61 +27,30 @@ static PN532_Config* _config = NULL;
 
 PN532_Status_t PN532_Init(PN532_Config* config)
 {
-    _config = config;
-    if (_config == NULL) {
-        return PN532_STATUS_ERROR;
-    }
+	_config = config;
+	if (_config == NULL) {
+		return PN532_STATUS_ERROR;
+	}
 
-    if (_config->log) {
-        _config->log("[PN532] - Initializing...\r\n");
-    }
+	if (_config->log) {
+		_config->log("[PN532] -  Initialized");
+	}
 
-    // Reset nếu có chân reset
-    reset();
-    HAL_Delay(100);
-
-    // Wakeup
-    wakeup();
-
-    // Verify firmware version
-    uint32_t versiondata = getFirmwareVersion();
-    if (!versiondata) {
-        if (_config->log) {
-            _config->log("[PN532] - Failed to get firmware version\r\n");
-        }
-        return PN532_STATUS_ERROR;
-    }
-
-    if (_config->log) {
-        _config->log("[PN532] - Found chip PN5");
-        _config->log("%02X\r\n", (versiondata >> 24) & 0xFF);
-        _config->log("[PN532] - Firmware ver. %d.", (versiondata >> 16) & 0xFF);
-        _config->log("%d\r\n", (versiondata >> 8) & 0xFF);
-    }
-
-    return PN532_STATUS_OK;
+	reset();
+	HAL_Delay(10);
+	wakeup();
+	
+	return PN532_STATUS_OK;
 }
 
 void reset(void)
 {
-    if (_config->reset_port != NULL) {
-        #ifdef PN532DEBUG
-        if (_config->log) {
-            _config->log("[PN532] - Hardware reset\r\n");
-        }
-        #endif
-
-        HAL_GPIO_WritePin(_config->reset_port, _config->reset_pin, GPIO_PIN_RESET);
-        HAL_Delay(10);
-        HAL_GPIO_WritePin(_config->reset_port, _config->reset_pin, GPIO_PIN_SET);
-        HAL_Delay(50);  // Tăng delay sau reset
-    } else {
-        #ifdef PN532DEBUG
-        if (_config->log) {
-            _config->log("[PN532] - No reset pin configured\r\n");
-        }
-        #endif
-    }
+	if (_config->reset_port != NULL) {
+		HAL_GPIO_WritePin(_config->reset_port, _config->reset_pin, GPIO_PIN_RESET);
+		HAL_Delay(1);
+		HAL_GPIO_WritePin(_config->reset_port, _config->reset_pin, GPIO_PIN_SET);
+		HAL_Delay(2);
+	}
 }
 
 void wakeup(void)
@@ -159,17 +128,12 @@ static bool isready(void)
     HAL_StatusTypeDef result = HAL_I2C_Master_Receive(_config->hi2c, _config->i2c_addr, &status, 1, 100);
 
     if (result != HAL_OK) {
-        #ifdef PN532DEBUG
-        if (_config->log) {
-            _config->log("[PN532] - I2C read failed: %d\r\n", result);
-        }
-        #endif
         return false;
     }
 
     #ifdef PN532DEBUG
-    if (_config->log && status == PN532_I2C_READY) {
-        _config->log("[PN532] - Ready! Status: 0x%02X\r\n", status);
+    if (_config->log) {
+        _config->log("[PN532] - Status byte: 0x%02X\r\n", status);
     }
     #endif
 
@@ -303,153 +267,92 @@ static void PrintHexChar(const uint8_t *pbtData, const uint32_t numBytes)
 
 bool SAMConfig(void)
 {
-    #ifdef PN532DEBUG
-    if (_config->log) {
-        _config->log("[PN532] - Configuring SAM...\r\n");
-    }
-    #endif
+	pn532_packetbuffer[0] = PN532_COMMAND_SAMCONFIGURATION;
+	pn532_packetbuffer[1] = 0x01; // normal mode;
+	pn532_packetbuffer[2] = 0x14; // timeout 50ms * 20 = 1 second
+	pn532_packetbuffer[3] = 0x01; // use IRQ pin!
 
-    pn532_packetbuffer[0] = PN532_COMMAND_SAMCONFIGURATION;
-    pn532_packetbuffer[1] = 0x01; // normal mode
-    pn532_packetbuffer[2] = 0x14; // timeout 50ms * 20 = 1 second
-    pn532_packetbuffer[3] = 0x01; // use IRQ pin
+	if (!sendCommandCheckAck(pn532_packetbuffer, 4, PN532_TIMEOUT)) {
+		return false;
+	}
 
-    if (!sendCommandCheckAck(pn532_packetbuffer, 4, PN532_TIMEOUT)) {
-        return false;
-    }
+	// read data packet
+	readdata(pn532_packetbuffer, 9);
 
-    readdata(pn532_packetbuffer, 9);
-
-    int offset = 6;
-    bool success = (pn532_packetbuffer[offset] == 0x15);
-
-    #ifdef PN532DEBUG
-    if (_config->log) {
-        if (success) {
-            _config->log("[PN532] - SAM configured successfully\r\n");
-        } else {
-            _config->log("[PN532] - SAM config failed\r\n");
-        }
-    }
-    #endif
-
-    return success;
-}
-
-uint32_t getFirmwareVersion(void)
-{
-    uint32_t response;
-
-    pn532_packetbuffer[0] = PN532_COMMAND_GETFIRMWAREVERSION;
-
-    if (!sendCommandCheckAck(pn532_packetbuffer, 1, PN532_TIMEOUT)) {
-        return 0;
-    }
-
-    readdata(pn532_packetbuffer, 13);
-
-    int offset = 6;
-    response = pn532_packetbuffer[offset++];
-    response <<= 8;
-    response |= pn532_packetbuffer[offset++];
-    response <<= 8;
-    response |= pn532_packetbuffer[offset++];
-    response <<= 8;
-    response |= pn532_packetbuffer[offset++];
-
-    return response;
+	int offset = 6;
+	return (pn532_packetbuffer[offset] == 0x15);
 }
 
 bool sendCommandCheckAck(uint8_t *cmd, uint8_t cmdlen, uint16_t timeout)
 {
-    writecommand(cmd, cmdlen);
+	uint8_t slowdown = 0;
+	if (HAL_I2C_GetState(_config->hi2c) != HAL_I2C_STATE_READY) {
+		slowdown = 1;
+	}
 
-    HAL_Delay(2);  // ✓ Thêm delay để PN532 xử lý
+	writecommand(cmd, cmdlen);
 
-    if (!waitready(timeout)) {
-        #ifdef PN532DEBUG
-        if (_config->log) {
-            _config->log("[PN532] - Timeout waiting for ready\r\n");
-        }
-        #endif
-        return false;
-    }
+	HAL_Delay(slowdown);
 
-    if(!readack()){
-        #ifdef PN532DEBUG
-        if (_config->log) {
-            _config->log("[PN532] - No ACK received\r\n");
-        }
-        #endif
-        return false;
-    }
+	if (!waitready(timeout)) {
 
-    HAL_Delay(2);  // ✓ Thêm delay trước khi đọc response
+		return false;
+	}
 
-    if (!waitready(timeout)) {
-        return false;
-    }
+	if(!readack()){
+		#ifdef PN532DEBUG
+			if (_config->log) {
+				_config->log("[PN532] - Timeout waiting for ACK\n");
+			}
+		#endif
+		return false;
+	}
 
-    return true;
+	HAL_Delay(slowdown);
+
+	if (!waitready(timeout)) {
+		return false;
+	}
+
+	return true;
 }
 
 bool setPassiveActivationRetries(uint8_t maxRetries)
 {
-    pn532_packetbuffer[0] = PN532_COMMAND_RFCONFIGURATION;
-    pn532_packetbuffer[1] = 0x05;
-    pn532_packetbuffer[2] = 0xFF;
-    pn532_packetbuffer[3] = 0x01;
-    pn532_packetbuffer[4] = maxRetries;
+	pn532_packetbuffer[0] = PN532_COMMAND_RFCONFIGURATION;
+	pn532_packetbuffer[1] = 0x05; // Set the max number of retries
+	pn532_packetbuffer[2] = 0xFF; // MxRtyATR (default = 0xFF)
+	pn532_packetbuffer[3] = 0x01; // MxRtyPSL (default = 0x01)
+	pn532_packetbuffer[4] = maxRetries; // Max retries
 
-    #ifdef PN532DEBUG
-    if (_config->log) {
-        _config->log("[PN532] - SetPassiveActivationRetries: %d\r\n", maxRetries);
-    }
-    #endif
+	#ifdef PN532DEBUG
+		if (_config->log) {
+			_config->log("[PN532] - SetPassiveActivationRetries: %d\n", maxRetries);
+		}
+	#endif
 
-    if (!sendCommandCheckAck(pn532_packetbuffer, 5, PN532_TIMEOUT)) {
-        return false;
-    }
-
-    readdata(pn532_packetbuffer, 9);
-    return true;
+	if (!sendCommandCheckAck(pn532_packetbuffer, 5, PN532_TIMEOUT)) {
+		return false;
+	}
+	return true;
 }
 
 bool readPassiveTargetID(uint8_t cardbaudrate, uint8_t *uid, uint8_t *uidLength, uint16_t timeout)
 {
-    pn532_packetbuffer[0] = PN532_COMMAND_INLISTPASSIVETARGET;
-    pn532_packetbuffer[1] = 0x01;
-    pn532_packetbuffer[2] = cardbaudrate;
+	pn532_packetbuffer[0] = PN532_COMMAND_INLISTPASSIVETARGET;
+	pn532_packetbuffer[1] = 0x01; // max 1 card at once
+	pn532_packetbuffer[2] = cardbaudrate;
 
-    #ifdef PN532DEBUG
-    if (_config->log) {
-        _config->log("[PN532] - Scanning for cards (timeout=%d ms)...\r\n", timeout);
-    }
-    #endif
+	if (!sendCommandCheckAck(pn532_packetbuffer, 3, timeout)) {
+		#ifdef PN532DEBUG
+			if (_config->log) {
+				_config->log("[PN532] - No card(s) read\n");
+			}
+		#endif
+		return false;
+	}
 
-    if (!sendCommandCheckAck(pn532_packetbuffer, 3, timeout > 1000 ? 1000 : timeout)) {
-        #ifdef PN532DEBUG
-        if (_config->log) {
-            _config->log("[PN532] - Command failed\r\n");
-        }
-        #endif
-        return false;
-    }
-
-    // PN532 cần thời gian để quét thẻ - đợi lâu hơn
-    HAL_Delay(50);
-
-    // Đợi response với timeout dài
-    if (!waitready(timeout)) {
-        #ifdef PN532DEBUG
-        if (_config->log) {
-            _config->log("[PN532] - No card detected\r\n");
-        }
-        #endif
-        return false;
-    }
-
-    return readDetectedPassiveTargetID(uid, uidLength);
+	return readDetectedPassiveTargetID(uid, uidLength);
 }
 
 bool startPassiveTargetIDDetection(uint8_t cardbaudrate)
@@ -464,53 +367,48 @@ bool startPassiveTargetIDDetection(uint8_t cardbaudrate)
 
 bool readDetectedPassiveTargetID(uint8_t *uid, uint8_t *uidLength)
 {
-    readdata(pn532_packetbuffer, 20);
+	readdata(pn532_packetbuffer, 20);
+	#ifdef MIFAREDEBUG
+		if (_config->log) {
+			_config->log("[PN532] - Found %d tag(s)\n", pn532_packetbuffer[7]);
+		}
+	#endif
+	if (pn532_packetbuffer[7] != 1) {
+		return false;
+	}
+	uint16_t sens_res = pn532_packetbuffer[9];
+	sens_res <<= 8;
+	sens_res |= pn532_packetbuffer[10];
+	#ifdef MIFAREDEBUG
+		if (_config->log) {
+			_config->log("[PN532] - ATQA: %02X\n", sens_res);
+			_config->log("[PN532] - SAK: %02X\n", pn532_packetbuffer[11]);
+		}
+	#endif
 
-    #ifdef MIFAREDEBUG
-    if (_config->log) {
-        _config->log("[PN532] - Found %d tag(s)\r\n", pn532_packetbuffer[7]);
-    }
-    #endif
+	*uidLength = pn532_packetbuffer[12];
 
-    if (pn532_packetbuffer[7] != 1) {
-        return false;
-    }
+	#ifdef MIFAREDEBUG
+		if (_config->log) {
+			_config->log("[PN532] - UID:");
+		}
+	#endif
 
-    uint16_t sens_res = pn532_packetbuffer[9];
-    sens_res <<= 8;
-    sens_res |= pn532_packetbuffer[10];
+	for (uint8_t i = 0; i < pn532_packetbuffer[12]; i++) {
+		uid[i] = pn532_packetbuffer[13 + i];
 
-    #ifdef MIFAREDEBUG
-    if (_config->log) {
-        _config->log("[PN532] - ATQA: 0x%04X\r\n", sens_res);
-        _config->log("[PN532] - SAK: 0x%02X\r\n", pn532_packetbuffer[11]);
-    }
-    #endif
-
-    *uidLength = pn532_packetbuffer[12];
-
-    #ifdef MIFAREDEBUG
-    if (_config->log) {
-        _config->log("[PN532] - UID:");
-    }
-    #endif
-
-    for (uint8_t i = 0; i < pn532_packetbuffer[12]; i++) {
-        uid[i] = pn532_packetbuffer[13 + i];
-        #ifdef MIFAREDEBUG
-        if (_config->log) {
-            _config->log(" %02X", uid[i]);
-        }
-        #endif
-    }
-
-    #ifdef MIFAREDEBUG
-    if (_config->log) {
-        _config->log("\r\n");
-    }
-    #endif
-
-    return true;
+		#ifdef MIFAREDEBUG
+			if (_config->log) {
+				_config->log(" %02X", uid[i]);
+			}
+		#endif
+	}
+	#ifdef MIFAREDEBUG
+		if (_config->log) {
+			_config->log("\n");
+		}
+	#endif
+	return true;
 }
 
 bool inDataExchange(uint8_t *send, uint8_t sendLength, uint8_t *response, uint8_t *responseLength)
