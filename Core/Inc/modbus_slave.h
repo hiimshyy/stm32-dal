@@ -13,142 +13,170 @@
 #include <stdbool.h>
 #include "modbus_regs.h"
 
-// Modbus function codes
+// Modbus RTU Configuration
+#define MODBUS_SLAVE_DEFAULT_ADDRESS    0x04
+#define MODBUS_BUFFER_SIZE              256
+#define MODBUS_TIMEOUT_MS               100
+#define MODBUS_T15_TICKS                2     // 1.5 character times
+#define MODBUS_T35_TICKS                4     // 3.5 character times
+
+// Modbus Function Codes
 #define MODBUS_FC_READ_HOLDING_REGISTERS    0x03
 #define MODBUS_FC_READ_INPUT_REGISTERS      0x04
 #define MODBUS_FC_WRITE_SINGLE_REGISTER     0x06
 #define MODBUS_FC_WRITE_MULTIPLE_REGISTERS  0x10
 
-// Modbus exception codes
-#define MODBUS_EXCEPTION_ILLEGAL_FUNCTION           0x01
-#define MODBUS_EXCEPTION_ILLEGAL_DATA_ADDRESS       0x02
-#define MODBUS_EXCEPTION_ILLEGAL_DATA_VALUE         0x03
-#define MODBUS_EXCEPTION_SLAVE_DEVICE_FAILURE       0x04
+// Modbus Exception Codes
+#define MODBUS_EXCEPTION_ILLEGAL_FUNCTION       0x01
+#define MODBUS_EXCEPTION_ILLEGAL_DATA_ADDRESS   0x02
+#define MODBUS_EXCEPTION_ILLEGAL_DATA_VALUE     0x03
+#define MODBUS_EXCEPTION_SLAVE_DEVICE_FAILURE   0x04
 
-// Modbus frame limits
-#define MODBUS_MAX_FRAME_SIZE       256
-#define MODBUS_MIN_FRAME_SIZE       4
-#define MODBUS_CRC_SIZE             2
-#define MODBUS_SLAVE_ADDRESS_SIZE   1
-#define MODBUS_FUNCTION_CODE_SIZE   1
+// Modbus Register Map Size
+#define MODBUS_REG_COUNT                256
 
-// Modbus timeouts
-#define MODBUS_TIMEOUT_MS           1000
-#define MODBUS_INTER_FRAME_DELAY    3.5f  // milliseconds
-#define MODBUS_INTER_CHAR_DELAY     1.5f  // milliseconds
-
-// Register limits
-#define MODBUS_MAX_REGISTERS        256
-#define MODBUS_MAX_READ_REGISTERS   125
-#define MODBUS_MAX_WRITE_REGISTERS  123
-
-// Status
+// Modbus Baudrate Options
 typedef enum {
-    MODBUS_STATUS_OK = 0,
-    MODBUS_STATUS_ERROR,
-    MODBUS_STATUS_TIMEOUT,
-    MODBUS_STATUS_CRC_ERROR,
-    MODBUS_STATUS_EXCEPTION,
-    MODBUS_STATUS_INVALID_FRAME
-} Modbus_Status_t;
+    MODBUS_BAUD_9600    = 9600,
+    MODBUS_BAUD_19200   = 19200,
+    MODBUS_BAUD_38400   = 38400,
+    MODBUS_BAUD_57600   = 57600,
+    MODBUS_BAUD_115200  = 115200
+} Modbus_Baudrate_t;
 
-// Register types
+// Modbus Parity Options
 typedef enum {
-    MODBUS_REG_TYPE_HOLDING = 0,
-    MODBUS_REG_TYPE_INPUT
-} Modbus_RegType_t;
+    MODBUS_PARITY_NONE  = 0,
+    MODBUS_PARITY_EVEN  = 1,
+    MODBUS_PARITY_ODD   = 2
+} Modbus_Parity_t;
 
-// Register access permissions
+// Modbus Stop Bits Options
 typedef enum {
-    MODBUS_REG_ACCESS_READ_ONLY = 0,
-    MODBUS_REG_ACCESS_WRITE_ONLY,
-    MODBUS_REG_ACCESS_READ_WRITE
-} Modbus_RegAccess_t;
+    MODBUS_STOPBITS_1   = 1,
+    MODBUS_STOPBITS_2   = 2
+} Modbus_StopBits_t;
 
-// Register definition structure
-typedef struct {
-    uint16_t address;
-    uint16_t *data_ptr;
-    Modbus_RegType_t type;
-    Modbus_RegAccess_t access;
-    bool valid;
-} Modbus_Register_t;
+// Modbus State Machine
+typedef enum {
+    MODBUS_STATE_IDLE,
+    MODBUS_STATE_RECEIVING,
+    MODBUS_STATE_PROCESSING,
+    MODBUS_STATE_SENDING
+} Modbus_State_t;
 
-// Modbus slave handle structure
+// Modbus Handle Structure
 typedef struct {
     UART_HandleTypeDef *huart;
     uint8_t slave_address;
-    uint32_t baudrate;
-    uint8_t parity;
-    uint8_t stop_bits;
+    uint16_t registers[MODBUS_REG_COUNT];
     
-    // Communication buffers
-    uint8_t rx_buffer[MODBUS_MAX_FRAME_SIZE];
-    uint8_t tx_buffer[MODBUS_MAX_FRAME_SIZE];
-    uint16_t rx_length;
+    uint8_t rx_buffer[MODBUS_BUFFER_SIZE];
+    uint16_t rx_index;
+    uint32_t last_byte_time;
+    
+    uint8_t tx_buffer[MODBUS_BUFFER_SIZE];
     uint16_t tx_length;
     
-    // Register storage
-    uint16_t holding_registers[MODBUS_MAX_REGISTERS];
-    uint16_t input_registers[MODBUS_MAX_REGISTERS];
-    Modbus_Register_t register_map[MODBUS_MAX_REGISTERS];
-    uint16_t register_count;
+    Modbus_State_t state;
     
-    // Status and statistics
-    Modbus_Status_t status;
-    uint32_t frame_count;
-    uint32_t error_count;
-    uint32_t exception_count;
-    uint32_t last_activity_time;
+    uint32_t baudrate;
+    Modbus_Parity_t parity;
+    Modbus_StopBits_t stopbits;
     
-    // Communication state
-    bool frame_ready;
-    bool response_pending;
-    uint32_t last_char_time;
+    // Statistics
+    uint32_t requests_processed;
+    uint32_t errors_count;
+    
+    // Callbacks for register access
+    void (*reg_read_callback)(uint16_t addr, uint16_t *value);
+    void (*reg_write_callback)(uint16_t addr, uint16_t value);
     
 } Modbus_Handle_t;
 
-// Function prototypes
-Modbus_Status_t Modbus_Init(Modbus_Handle_t *hmodbus, UART_HandleTypeDef *huart, uint8_t slave_address);
-Modbus_Status_t Modbus_SetConfig(Modbus_Handle_t *hmodbus, uint32_t baudrate, uint8_t parity, uint8_t stop_bits);
-Modbus_Status_t Modbus_RegisterMapping(Modbus_Handle_t *hmodbus);
+// Function Prototypes
 
-// Register management
-Modbus_Status_t Modbus_AddRegister(Modbus_Handle_t *hmodbus, uint16_t address, uint16_t *data_ptr, 
-                                  Modbus_RegType_t type, Modbus_RegAccess_t access);
-Modbus_Status_t Modbus_SetRegisterValue(Modbus_Handle_t *hmodbus, uint16_t address, uint16_t value);
-Modbus_Status_t Modbus_GetRegisterValue(Modbus_Handle_t *hmodbus, uint16_t address, uint16_t *value);
-bool Modbus_IsValidRegister(Modbus_Handle_t *hmodbus, uint16_t address);
+/**
+ * @brief Initialize Modbus RTU Slave
+ * @param hmodbus: Pointer to Modbus handle
+ * @param huart: Pointer to UART handle (UART2)
+ * @param slave_addr: Modbus slave address (1-247)
+ * @return HAL_StatusTypeDef
+ */
+HAL_StatusTypeDef Modbus_Init(Modbus_Handle_t *hmodbus, UART_HandleTypeDef *huart, uint8_t slave_addr);
 
-// Communication functions
-Modbus_Status_t Modbus_Process(Modbus_Handle_t *hmodbus);
-Modbus_Status_t Modbus_StartReceive(Modbus_Handle_t *hmodbus);
-void Modbus_RxCallback(Modbus_Handle_t *hmodbus);
-void Modbus_TxCallback(Modbus_Handle_t *hmodbus);
-void Modbus_ErrorCallback(Modbus_Handle_t *hmodbus);
+/**
+ * @brief Set Modbus communication parameters
+ * @param hmodbus: Pointer to Modbus handle
+ * @param baudrate: Baudrate value (9600, 19200, 38400, 57600, 115200)
+ * @param parity: Parity setting (NONE, EVEN, ODD)
+ * @param stopbits: Stop bits (1 or 2)
+ * @return HAL_StatusTypeDef
+ */
+HAL_StatusTypeDef Modbus_SetConfig(Modbus_Handle_t *hmodbus, uint32_t baudrate, 
+                                   Modbus_Parity_t parity, Modbus_StopBits_t stopbits);
 
-// Frame processing functions
-Modbus_Status_t Modbus_ProcessFrame(Modbus_Handle_t *hmodbus);
-Modbus_Status_t Modbus_ProcessReadHoldingRegisters(Modbus_Handle_t *hmodbus);
-Modbus_Status_t Modbus_ProcessReadInputRegisters(Modbus_Handle_t *hmodbus);
-Modbus_Status_t Modbus_ProcessWriteSingleRegister(Modbus_Handle_t *hmodbus);
-Modbus_Status_t Modbus_ProcessWriteMultipleRegisters(Modbus_Handle_t *hmodbus);
+/**
+ * @brief Main Modbus processing function (call in main loop or task)
+ * @param hmodbus: Pointer to Modbus handle
+ */
+void Modbus_Process(Modbus_Handle_t *hmodbus);
 
-// Response functions
-Modbus_Status_t Modbus_SendResponse(Modbus_Handle_t *hmodbus);
-Modbus_Status_t Modbus_SendException(Modbus_Handle_t *hmodbus, uint8_t function_code, uint8_t exception_code);
+/**
+ * @brief Write value to Modbus register
+ * @param hmodbus: Pointer to Modbus handle
+ * @param address: Register address
+ * @param value: Value to write
+ * @return true if successful
+ */
+bool Modbus_WriteRegister(Modbus_Handle_t *hmodbus, uint16_t address, uint16_t value);
 
-// Utility functions
-uint16_t Modbus_CalculateCRC(uint8_t *data, uint16_t length);
-bool Modbus_VerifyCRC(uint8_t *data, uint16_t length);
-void Modbus_AddCRC(uint8_t *data, uint16_t length);
-uint32_t Modbus_CalculateTimeout(uint32_t baudrate);
+/**
+ * @brief Read value from Modbus register
+ * @param hmodbus: Pointer to Modbus handle
+ * @param address: Register address
+ * @param value: Pointer to store read value
+ * @return true if successful
+ */
+bool Modbus_ReadRegister(Modbus_Handle_t *hmodbus, uint16_t address, uint16_t *value);
 
-// Status and debug functions
-Modbus_Status_t Modbus_GetStatus(Modbus_Handle_t *hmodbus);
-uint32_t Modbus_GetFrameCount(Modbus_Handle_t *hmodbus);
-uint32_t Modbus_GetErrorCount(Modbus_Handle_t *hmodbus);
-uint32_t Modbus_GetExceptionCount(Modbus_Handle_t *hmodbus);
-void Modbus_ResetStatistics(Modbus_Handle_t *hmodbus);
+/**
+ * @brief Register callback for register read operations
+ * @param hmodbus: Pointer to Modbus handle
+ * @param callback: Callback function
+ */
+void Modbus_RegisterReadCallback(Modbus_Handle_t *hmodbus, 
+                                  void (*callback)(uint16_t addr, uint16_t *value));
+
+/**
+ * @brief Register callback for register write operations
+ * @param hmodbus: Pointer to Modbus handle
+ * @param callback: Callback function
+ */
+void Modbus_RegisterWriteCallback(Modbus_Handle_t *hmodbus, 
+                                   void (*callback)(uint16_t addr, uint16_t value));
+
+/**
+ * @brief UART Receive Interrupt Handler (call from HAL_UART_RxCpltCallback)
+ * @param hmodbus: Pointer to Modbus handle
+ * @param byte: Received byte
+ */
+void Modbus_UART_RxCallback(Modbus_Handle_t *hmodbus, uint8_t byte);
+
+/**
+ * @brief Calculate CRC16 for Modbus RTU
+ * @param buffer: Data buffer
+ * @param length: Buffer length
+ * @return CRC16 value
+ */
+uint16_t Modbus_CRC16(uint8_t *buffer, uint16_t length);
+
+/**
+ * @brief Get Modbus statistics
+ * @param hmodbus: Pointer to Modbus handle
+ * @param requests: Pointer to store request count
+ * @param errors: Pointer to store error count
+ */
+void Modbus_GetStats(Modbus_Handle_t *hmodbus, uint32_t *requests, uint32_t *errors);
 
 #endif /* INC_MODBUS_SLAVE_H_ */

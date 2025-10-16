@@ -55,13 +55,6 @@ const osThreadAttr_t defaultTask_attributes = {
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
-/* Definitions for modbusTask */
-// osThreadId_t modbusTaskHandle;
-// const osThreadAttr_t modbusTask_attributes = {
-//   .name = "modbusTask",
-//   .stack_size = 128 * 4,
-//   .priority = (osPriority_t) osPriorityNormal,
-// };
 /* Definitions for sensorTask */
 osThreadId_t sensorTaskHandle;
 const osThreadAttr_t sensorTask_attributes = {
@@ -76,11 +69,18 @@ const osThreadAttr_t nfcTask_attributes = {
   .stack_size = 128 * 4, // Giảm về 512 bytes
   .priority = (osPriority_t) osPriorityLow, // Thử priority thấp hơn
 };
+/* Definitions for modbusTask */
+osThreadId_t modbusTaskHandle;
+const osThreadAttr_t modbusTask_attributes = {
+  .name = "modbusTask",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
 /* USER CODE BEGIN PV */
 // Module handles
 PN532_Config pn532_config;
 BNO055_Handle_t hbno055;
-// Modbus_Handle_t hmodbus;
+Modbus_Handle_t hmodbus;
 
 // Data buffers
 uint16_t sensor_data[32];
@@ -122,7 +122,6 @@ const osEventFlagsAttr_t systemEvents_attributes = {
 // Event flags
 #define EVENT_SENSOR_DATA_READY    (1UL << 0)
 #define EVENT_NFC_DATA_READY       (1UL << 1)
-// #define EVENT_MODBUS_REQUEST       (1UL << 2)
 #define EVENT_SYSTEM_ERROR         (1UL << 3)
 /* USER CODE END PV */
 
@@ -133,20 +132,17 @@ static void MX_I2C1_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_USART2_UART_Init(void);
 void StartDefaultTask(void *argument);
-// void StartModbusTask(void *argument);
 void StartSensorTask(void *argument);
 void StartNfcTask(void *argument);
+void StartModbusTask(void *argument);
 
 /* USER CODE BEGIN PFP */
 void SystemInit_Modules(void);
-void UpdateSensorData(void);
-void UpdateNFCData(void);
-void ProcessModbusCommands(void);
 void DebugPrint(const char* format, ...);
-void I2C_BasicTest(void);
 void I2C_Scanner(void);
 void DebugDumpHex(const char* label, uint8_t* data, uint8_t len);
-void CheckMemoryUsage(void);
+void Modbus_OnRegisterRead(uint16_t addr, uint16_t *value);
+void Modbus_OnRegisterWrite(uint16_t addr, uint16_t value);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -191,6 +187,28 @@ int main(void)
   // Initialize modules
   SystemInit_Modules();
   
+  // Initialize Modbus RTU Slave
+  if (Modbus_Init(&hmodbus, &huart2, MODBUS_SLAVE_DEFAULT_ADDRESS) == HAL_OK) {
+    DebugPrint("Modbus RTU initialized on UART2\r\n");
+    DebugPrint("  Slave Address: %d\r\n", MODBUS_SLAVE_DEFAULT_ADDRESS);
+    DebugPrint("  Baudrate: 115200\r\n");
+    
+    // Register callbacks
+    Modbus_RegisterReadCallback(&hmodbus, Modbus_OnRegisterRead);
+    Modbus_RegisterWriteCallback(&hmodbus, Modbus_OnRegisterWrite);
+    
+    // Initialize system registers with default values
+    Modbus_WriteRegister(&hmodbus, REG_DEVICE_ID, MODBUS_SLAVE_DEFAULT_ADDRESS);
+    Modbus_WriteRegister(&hmodbus, REG_MODULE_TYPE, 0x0002);
+    Modbus_WriteRegister(&hmodbus, REG_FIRMWARE_VERSION, 0x0101);
+    Modbus_WriteRegister(&hmodbus, REG_HARDWARE_VERSION, 0x0101);
+    Modbus_WriteRegister(&hmodbus, REG_CONFIG_BAUDRATE, 5); // 115200
+    Modbus_WriteRegister(&hmodbus, REG_CONFIG_PARITY, 0);   // None
+    Modbus_WriteRegister(&hmodbus, REG_CONFIG_STOP_BITS, 1); // 1 stop bit
+  } else {
+    DebugPrint("Modbus initialization failed!\r\n");
+  }
+  
   DebugPrint("DAL Module Started\r\n");
   DebugPrint("Firmware Version: v1.01\r\n");
   DebugPrint("Hardware Version: v1.01\r\n");
@@ -221,13 +239,16 @@ int main(void)
   /* creation of defaultTask */
   defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
 
-  /* creation of modbusTask */
-  // modbusTaskHandle = osThreadNew(StartModbusTask, NULL, &modbusTask_attributes);
 
   /* creation of sensorTask */
   sensorTaskHandle = osThreadNew(StartSensorTask, NULL, &sensorTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
+  /* creation of modbusTask */
+  modbusTaskHandle = osThreadNew(StartModbusTask, NULL, &modbusTask_attributes);
+  if (modbusTaskHandle == NULL) {
+    DebugPrint("Failed to create modbusTask\r\n");
+  }
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -515,31 +536,6 @@ void SystemInit_Modules(void)
         DebugPrint("PN532 initialization failed\n");
     }
     
-    // Initialize Modbus slave
-    // DebugPrint("Initializing Modbus slave...\r\n");
-    
-    // Check UART2 state first
-    // DebugPrint("UART2 State: %d ", huart2.gState);
-    // switch(huart2.gState) {
-    //     case HAL_UART_STATE_RESET:     DebugPrint("(RESET)\r\n"); break;
-    //     case HAL_UART_STATE_READY:     DebugPrint("(READY)\r\n"); break;
-    //     case HAL_UART_STATE_BUSY:      DebugPrint("(BUSY)\r\n"); break;
-    //     case HAL_UART_STATE_BUSY_TX:   DebugPrint("(BUSY_TX)\r\n"); break;
-    //     case HAL_UART_STATE_BUSY_RX:   DebugPrint("(BUSY_RX)\r\n"); break;
-    //     case HAL_UART_STATE_BUSY_TX_RX: DebugPrint("(BUSY_TX_RX)\r\n"); break;
-    //     case HAL_UART_STATE_TIMEOUT:   DebugPrint("(TIMEOUT)\r\n"); break;
-    //     case HAL_UART_STATE_ERROR:     DebugPrint("(ERROR)\r\n"); break;
-    //     default: DebugPrint("(UNKNOWN)\r\n"); break;
-    // }
-    
-    // Modbus_Status_t modbus_status = Modbus_Init(&hmodbus, &huart2, 4);
-    // if (modbus_status == MODBUS_STATUS_OK) {
-    //     DebugPrint("Modbus slave initialized successfully\r\n");
-    //     system_status |= 0x04; // Modbus OK
-    // } else {
-    //     DebugPrint("Modbus slave initialization failed with status: %d\r\n", modbus_status);
-    //     system_error |= 0x04; // Modbus Error
-    // }
     
     sensors_initialized = true;
     DebugPrint("Module initialization completed\r\n");
@@ -559,39 +555,8 @@ void DebugPrint(const char* format, ...)
     HAL_UART_Transmit(&huart1, (uint8_t*)debug_buffer, strlen(debug_buffer), 100);
 }
 
-/**
- * @brief UART2 Rx Complete callback (for Modbus)
- */
-// void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
-// {
-//     if (huart == &huart2) {
-//         Modbus_RxCallback(&hmodbus);
-//         // Signal Modbus task that data is available
-//         osEventFlagsSet(systemEventsHandle, EVENT_MODBUS_REQUEST);
-//     }
-// }
 
-/**
- * @brief UART2 Tx Complete callback (for Modbus)
- */
-// void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
-// {
-//     if (huart == &huart2) {
-//         Modbus_TxCallback(&hmodbus);
-//     }
-// }
 
-/**
- * @brief UART Error callback
- */
-// void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
-// {
-//     if (huart == &huart2) {
-//         Modbus_ErrorCallback(&hmodbus);
-//         // Signal system error
-//         osEventFlagsSet(systemEventsHandle, EVENT_SYSTEM_ERROR);
-//     }
-// }
 
 /**
  * @brief I2C Scanner to detect devices on the bus
@@ -713,70 +678,6 @@ void StartDefaultTask(void *argument)
   /* USER CODE END 5 */
 }
 
-/* USER CODE BEGIN Header_StartModbusTask */
-/**
-* @brief Function implementing the modbusTask thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_StartModbusTask */
-// void StartModbusTask(void *argument)
-// {
-//   /* USER CODE BEGIN StartModbusTask */
-//   // Wait for system initialization
-//   osEventFlagsWait(systemEventsHandle, EVENT_SENSOR_DATA_READY, osFlagsWaitAny, osWaitForever);
-//   
-//   DebugPrint("Modbus Task Started\r\n");
-//   
-//   /* Infinite loop */
-//   for(;;)
-//   {
-//     // Wait for Modbus request or timeout
-//     uint32_t events = osEventFlagsWait(systemEventsHandle, 
-//                                       EVENT_MODBUS_REQUEST, 
-//                                       osFlagsWaitAny, 
-//                                       10); // 10ms timeout
-//     
-//     // Check if Modbus request event was received
-//     if (events & EVENT_MODBUS_REQUEST) {
-//       // Clear the event flag
-//       osEventFlagsClear(systemEventsHandle, EVENT_MODBUS_REQUEST);
-//     }
-//     
-//     // Process Modbus communication
-//     if (sensors_initialized) {
-//       // Acquire data mutex before updating system registers
-//       if (osMutexAcquire(dataMutexHandle, 10) == osOK) {
-//         // Update system registers
-//         Modbus_SetRegisterValue(&hmodbus, REG_SYSTEM_STATUS, system_status);
-//         Modbus_SetRegisterValue(&hmodbus, REG_SYSTEM_ERROR, system_error);
-//         
-//         // Process Modbus communication
-//         Modbus_Process(&hmodbus);
-//         
-//         // Handle special commands
-//         uint16_t reset_cmd;
-//         if (Modbus_GetRegisterValue(&hmodbus, REG_RESET_ERROR_CMD, &reset_cmd) == MODBUS_STATUS_OK) {
-//           if (reset_cmd == 0x0001) {
-//             // Reset all error flags
-//             system_error = 0;
-//             Modbus_SetRegisterValue(&hmodbus, REG_IMU_ERROR, 0);
-//             Modbus_SetRegisterValue(&hmodbus, REG_PN532_ERROR, 0);
-//             Modbus_SetRegisterValue(&hmodbus, REG_SYSTEM_ERROR, 0);
-//             Modbus_SetRegisterValue(&hmodbus, REG_RESET_ERROR_CMD, 0); // Clear command
-//             
-//             DebugPrint("Error flags reset\r\n");
-//           }
-//         }
-//         
-//         osMutexRelease(dataMutexHandle);
-//       }
-//     }
-//     
-//     osDelay(1); // Small delay to prevent busy waiting
-//   }
-//   /* USER CODE END StartModbusTask */
-// }
 
 /* USER CODE BEGIN Header_StartSensorTask */
 /**
@@ -816,10 +717,10 @@ void StartSensorTask(void *argument)
             MAFilter_Init(&accFilter);
 
 //          BNO055_Vector_t *accel = BNO055_GetAccel(&hbno055);
-			BNO055_Vector_t *lin_accel = BNO055_GetLinearAccel(&hbno055);
-			BNO055_Quaternion_t *quat = BNO055_GetQuaternion(&hbno055);
-			BNO055_Euler_t *euler = BNO055_GetEuler(&hbno055);
-			BNO055_Vector_t *gyro = BNO055_GetGyro(&hbno055);
+            BNO055_Vector_t *lin_accel = BNO055_GetLinearAccel(&hbno055);
+            BNO055_Quaternion_t *quat = BNO055_GetQuaternion(&hbno055);
+            BNO055_Euler_t *euler = BNO055_GetEuler(&hbno055);
+            BNO055_Vector_t *gyro = BNO055_GetGyro(&hbno055);
 
 //          DebugPrint("========IMU Data========\r\n");
 //          DebugPrint("Acceleration: %.2f, %.2f, %.2f\r\n", accel->x * 0.01f, accel->y * 0.01f, accel->z * 0.01f);
@@ -903,23 +804,6 @@ void StartSensorTask(void *argument)
 //          DebugPrint("a_fwd: %.3f (lp %.3f) dt: %.3f => v: %.3f m/s | heading: %.2f\r\n",
 //                    a_forward, a_forward_lp, dt, v, euler->heading);
 //          DebugPrint("v: %.3f m/s | heading: %.2f\r\n", v, euler->heading);
-          // Update Modbus registers nếu cần
-          // Modbus_SetRegisterValue(&hmodbus, REG_VELOCITY_X, (uint16_t)(vx * 1000)); // mm/s
-          // Modbus_SetRegisterValue(&hmodbus, REG_VELOCITY_Y, (uint16_t)(vy * 1000));
-          // Modbus_SetRegisterValue(&hmodbus, REG_ORIENTATION, (uint16_t)orientation_z);
-          
-          // Modbus_SetRegisterValue(&hmodbus, REG_MAG_X, (uint16_t)mag->x);
-          // Modbus_SetRegisterValue(&hmodbus, REG_MAG_Y, (uint16_t)mag->y);
-          // Modbus_SetRegisterValue(&hmodbus, REG_MAG_Z, (uint16_t)mag->z);
-          
-          // Update IMU status
-          // BNO055_CalibStatus_t *calib = BNO055_GetCalibStatus(&hbno055);
-          // uint16_t imu_status = (calib->system << 6) | (calib->gyro << 4) | 
-          //                      (calib->accel << 2) | calib->mag;
-          // Modbus_SetRegisterValue(&hmodbus, REG_IMU_STATUS, imu_status);
-          
-          // uint8_t error_code = BNO055_GetErrorCode(&hbno055);
-          // Modbus_SetRegisterValue(&hmodbus, REG_IMU_ERROR, error_code);
           
           // Reset fail counter on success
           extern uint32_t imu_fail_counter; // Declare extern
@@ -964,17 +848,17 @@ void StartNfcTask(void *argument)
   osEventFlagsWait(systemEventsHandle, EVENT_SENSOR_DATA_READY, osFlagsWaitAny, 10000);
 
   if (setPassiveActivationRetries(0xFF)) {
-        DebugPrint("PN532 passive retries configured\r\n");
-    } else {
-        DebugPrint("Failed to configure passive retries\r\n");
-    }
+    DebugPrint("PN532 passive retries configured\r\n");
+  } else {
+    DebugPrint("Failed to configure passive retries\r\n");
+  }
 
-    // SAMConfig
-    if (SAMConfig()) {
-        DebugPrint("PN532 SAMConfig successful\r\n");
-    } else {
-        DebugPrint("PN532 SAMConfig failed\r\n");
-    }
+  // SAMConfig
+  if (!SAMConfig()) {
+      DebugPrint("PN532 SAMConfig successful\r\n");
+  } else {
+      DebugPrint("PN532 SAMConfig failed\r\n");
+  }
   /* Infinite loop */
   for(;;)
   {
@@ -1022,17 +906,7 @@ void StartNfcTask(void *argument)
             } else {
               nfc_card_type = 0; // Unknown
               DebugPrint("Card Type: Unknown (%d-byte UID)\r\n", uid_length);
-            }
-            
-            // Update Modbus registers if needed
-            // uint16_t uid_low = (uid[1] << 8) | uid[0];
-            // uint16_t uid_high = (uid_length > 2) ? ((uid[3] << 8) | uid[2]) : 0;
-            // Modbus_SetRegisterValue(&hmodbus, REG_PN532_DATA_LOW, uid_low);
-            // Modbus_SetRegisterValue(&hmodbus, REG_PN532_DATA_HIGH, uid_high);
-            // Modbus_SetRegisterValue(&hmodbus, REG_PN532_CARD_TYPE, nfc_card_type);
-            // Modbus_SetRegisterValue(&hmodbus, REG_PN532_STATUS, 0x01); // Card present
-            // Modbus_SetRegisterValue(&hmodbus, REG_PN532_ERROR, 0x00);
-            
+            }            
             // Signal that new NFC data is available
             osEventFlagsSet(systemEventsHandle, EVENT_NFC_DATA_READY);
           }
@@ -1051,12 +925,6 @@ void StartNfcTask(void *argument)
             nfc_last_card_uid = 0;
             memset(nfc_card_uid, 0, sizeof(nfc_card_uid));
             
-            // Update Modbus registers
-            // Modbus_SetRegisterValue(&hmodbus, REG_PN532_DATA_LOW, 0x0000);
-            // Modbus_SetRegisterValue(&hmodbus, REG_PN532_DATA_HIGH, 0x0000);
-            // Modbus_SetRegisterValue(&hmodbus, REG_PN532_CARD_TYPE, 0x00);
-            // Modbus_SetRegisterValue(&hmodbus, REG_PN532_STATUS, 0x00); // No card
-            // Modbus_SetRegisterValue(&hmodbus, REG_PN532_ERROR, 0x00);
           }
           
           system_error &= ~0x02; // Clear NFC error (no card is not an error)
@@ -1080,12 +948,6 @@ void StartNfcTask(void *argument)
         nfc_card_type = 0;
         nfc_last_card_uid = 0;
         
-        // Update Modbus registers
-        // Modbus_SetRegisterValue(&hmodbus, REG_PN532_DATA_LOW, 0x0000);
-        // Modbus_SetRegisterValue(&hmodbus, REG_PN532_DATA_HIGH, 0x0000);
-        // Modbus_SetRegisterValue(&hmodbus, REG_PN532_CARD_TYPE, 0x00);
-        // Modbus_SetRegisterValue(&hmodbus, REG_PN532_STATUS, 0x00);
-        // Modbus_SetRegisterValue(&hmodbus, REG_PN532_ERROR, 0xFF); // Sensor not connected
         
         osMutexRelease(dataMutexHandle);
       }
@@ -1094,6 +956,210 @@ void StartNfcTask(void *argument)
     osDelay(500);
   }
   /* USER CODE END StartNfcTask */
+}
+
+/* USER CODE BEGIN Header_StartModbusTask */
+/**
+* @brief Function implementing the modbusTask thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartModbusTask */
+void StartModbusTask(void *argument)
+{
+  /* USER CODE BEGIN StartModbusTask */
+  DebugPrint("------Modbus Task Started------\r\n");
+  
+  uint32_t stats_counter = 0;
+  uint32_t debug_counter = 0;
+  
+  /* Infinite loop */
+  for(;;)
+  {
+    // Process Modbus communication
+    Modbus_Process(&hmodbus);
+    
+    // Debug: Print state và rx_index mỗi 5 giây
+    if (++debug_counter >= 5000) {
+      DebugPrint("Modbus State: %d, RX Index: %d, UART State: %d\r\n", 
+                 hmodbus.state, hmodbus.rx_index, hmodbus.huart->RxState);
+      debug_counter = 0;
+    }
+    
+    // Print statistics every 10 seconds
+    if (++stats_counter >= 10000) {
+      uint32_t requests, errors;
+      Modbus_GetStats(&hmodbus, &requests, &errors);
+      DebugPrint("Modbus Stats - Requests: %lu, Errors: %lu\r\n", requests, errors);
+      stats_counter = 0;
+    }
+    
+    osDelay(1); // 1ms polling rate
+  }
+  /* USER CODE END StartModbusTask */
+}
+
+/**
+ * @brief Callback được gọi khi Master đọc thanh ghi
+ */
+void Modbus_OnRegisterRead(uint16_t addr, uint16_t *value)
+{
+    // Cập nhật các thanh ghi từ dữ liệu thực tế
+    switch (addr) {
+        // IMU Registers - lấy từ sensor_data[]
+        case REG_ACCEL_X:
+        case REG_ACCEL_Y:
+        case REG_ACCEL_Z:
+        case REG_GYRO_X:
+        case REG_GYRO_Y:
+        case REG_GYRO_Z:
+        case REG_MAG_X:
+        case REG_MAG_Y:
+        case REG_MAG_Z:
+            if (addr <= 0x0008) {
+                *value = sensor_data[addr];
+            }
+            break;
+            
+        case REG_IMU_STATUS:
+            *value = (system_status & 0x01) ? 1 : 0;
+            break;
+            
+        case REG_IMU_ERROR:
+            *value = (system_error & 0x01) ? 1 : 0;
+            break;
+            
+        // Digital Input Registers
+        case REG_DI_1:
+            *value = HAL_GPIO_ReadPin(IN_1_GPIO_Port, IN_1_Pin);
+            break;
+        case REG_DI_2:
+            *value = HAL_GPIO_ReadPin(IN_2_GPIO_Port, IN_2_Pin);
+            break;
+        case REG_DI_3:
+            *value = HAL_GPIO_ReadPin(IN_3_GPIO_Port, IN_3_Pin);
+            break;
+        case REG_DI_4:
+            *value = HAL_GPIO_ReadPin(IN_4_GPIO_Port, IN_4_Pin);
+            break;
+            
+        case REG_DI_STATUS:
+            *value = (HAL_GPIO_ReadPin(IN_1_GPIO_Port, IN_1_Pin) << 0) |
+                     (HAL_GPIO_ReadPin(IN_2_GPIO_Port, IN_2_Pin) << 1) |
+                     (HAL_GPIO_ReadPin(IN_3_GPIO_Port, IN_3_Pin) << 2) |
+                     (HAL_GPIO_ReadPin(IN_4_GPIO_Port, IN_4_Pin) << 3);
+            break;
+            
+        // PN532 NFC Registers
+        case REG_PN532_DATA_LOW:
+            if (nfc_card_present && nfc_card_uid_length >= 4) {
+                *value = (nfc_card_uid[1] << 8) | nfc_card_uid[0];
+            } else {
+                *value = 0;
+            }
+            break;
+            
+        case REG_PN532_DATA_HIGH:
+            if (nfc_card_present && nfc_card_uid_length >= 4) {
+                *value = (nfc_card_uid[3] << 8) | nfc_card_uid[2];
+            } else {
+                *value = 0;
+            }
+            break;
+            
+        case REG_PN532_STATUS:
+            *value = (system_status & 0x02) ? 1 : 0;
+            break;
+            
+        case REG_PN532_ERROR:
+            *value = (system_error & 0x02) ? 1 : 0;
+            break;
+            
+        case REG_PN532_CARD_TYPE:
+            *value = nfc_card_present ? nfc_card_type : 0;
+            break;
+            
+        case REG_PN532_CARD_UID:
+            *value = nfc_card_present ? nfc_card_uid_length : 0;
+            break;
+            
+        // System Registers
+        case REG_SYSTEM_STATUS:
+            *value = system_status;
+            break;
+            
+        case REG_SYSTEM_ERROR:
+            *value = system_error;
+            break;
+            
+        default:
+            // Giữ nguyên giá trị đã lưu trong thanh ghi
+            break;
+    }
+}
+
+/**
+ * @brief Callback được gọi khi Master ghi thanh ghi
+ */
+void Modbus_OnRegisterWrite(uint16_t addr, uint16_t value)
+{
+    switch (addr) {
+        case REG_DEVICE_ID:
+            // Thay đổi địa chỉ Modbus slave
+            if (value > 0 && value <= 247) {
+                hmodbus.slave_address = (uint8_t)value;
+                DebugPrint("Modbus slave address changed to: %d\r\n", value);
+            }
+            break;
+            
+        case REG_CONFIG_BAUDRATE:
+            // Thay đổi baudrate
+            {
+                uint32_t new_baudrate;
+                switch (value) {
+                    case 1: new_baudrate = MODBUS_BAUD_9600; break;
+                    case 2: new_baudrate = MODBUS_BAUD_19200; break;
+                    case 3: new_baudrate = MODBUS_BAUD_38400; break;
+                    case 4: new_baudrate = MODBUS_BAUD_57600; break;
+                    case 5: new_baudrate = MODBUS_BAUD_115200; break;
+                    default: new_baudrate = MODBUS_BAUD_115200; break;
+                }
+                if (Modbus_SetConfig(&hmodbus, new_baudrate, hmodbus.parity, hmodbus.stopbits) == HAL_OK) {
+                    DebugPrint("Modbus baudrate changed to: %lu\r\n", new_baudrate);
+                }
+            }
+            break;
+            
+        case REG_CONFIG_PARITY:
+            // Thay đổi parity
+            if (value <= 2) {
+                if (Modbus_SetConfig(&hmodbus, hmodbus.baudrate, (Modbus_Parity_t)value, hmodbus.stopbits) == HAL_OK) {
+                    DebugPrint("Modbus parity changed to: %d\r\n", value);
+                }
+            }
+            break;
+            
+        case REG_CONFIG_STOP_BITS:
+            // Thay đổi stop bits
+            if (value == 1 || value == 2) {
+                if (Modbus_SetConfig(&hmodbus, hmodbus.baudrate, hmodbus.parity, (Modbus_StopBits_t)value) == HAL_OK) {
+                    DebugPrint("Modbus stop bits changed to: %d\r\n", value);
+                }
+            }
+            break;
+            
+        case REG_RESET_ERROR_CMD:
+            // Reset error flags
+            if (value == 1) {
+                system_error = 0;
+                DebugPrint("System errors reset\r\n");
+            }
+            break;
+            
+        default:
+            // Lưu giá trị vào thanh ghi mặc định
+            break;
+    }
 }
 
 /**

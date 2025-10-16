@@ -7,3 +7,4 @@
 ../Core/Src/stm32f1xx_it.c:160:6:SysTick_Handler	8	static
 ../Core/Src/stm32f1xx_it.c:189:6:USART1_IRQHandler	0	static
 ../Core/Src/stm32f1xx_it.c:203:6:USART2_IRQHandler	0	static
+../Core/Src/stm32f1xx_it.c:220:6:HAL_UART_RxCpltCallback	0	static

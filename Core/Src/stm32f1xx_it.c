@@ -212,5 +212,19 @@ void USART2_IRQHandler(void)
 }
 
 /* USER CODE BEGIN 1 */
+extern Modbus_Handle_t hmodbus;
 
+/**
+ * @brief UART Receive Complete Callback
+ */
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+    if (huart->Instance == USART2) {
+        // Lấy byte vừa nhận (nằm ở vị trí rx_index hiện tại)
+        uint8_t received_byte = hmodbus.rx_buffer[hmodbus.rx_index];
+        
+        // Gọi callback Modbus để xử lý byte
+        Modbus_UART_RxCallback(&hmodbus, received_byte);
+    }
+}
 /* USER CODE END 1 */

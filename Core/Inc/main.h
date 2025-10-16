@@ -34,8 +34,8 @@ extern "C" {
 #include "pn532.h"
 #include "bno055.h"
 #include "filter.h"
-// #include "modbus_slave.h"
-// #include "modbus_regs.h"
+#include "modbus_slave.h"
+#include "modbus_regs.h"
 #include <stdio.h>
 /* USER CODE END Includes */
 
