@@ -109,6 +109,8 @@ char debug_buffer[128];
 // IMU fail counter for error handling
 uint32_t imu_fail_counter = 0;
 
+BNO055_Vector_t *_g_lin_accel;
+BNO055_Vector_t *_g_gyro_data;
 // RTOS synchronization objects
 osMutexId_t dataMutexHandle;
 const osMutexAttr_t dataMutex_attributes = {
@@ -689,14 +691,22 @@ void Modbus_OnRegisterRead(uint16_t addr, uint16_t *value)
     switch (addr) {
         // IMU Registers - lấy từ sensor_data[]
         case REG_ACCEL_X:
+            *value = (uint16_t)_g_lin_accel->x;
+            break;
         case REG_ACCEL_Y:
+            *value = (uint16_t)_g_lin_accel->y;
+            break;
         case REG_ACCEL_Z:
+            *value = (uint16_t)_g_lin_accel->z;
+            break;
         case REG_GYRO_X:
+            *value = (uint16_t)_g_gyro_data->x;
+            break;
         case REG_GYRO_Y:
+            *value = (uint16_t)_g_gyro_data->y;
+            break;
         case REG_GYRO_Z:
-            if (addr <= 0x0008) {
-                *value = sensor_data[addr];
-            }
+            *value = (uint16_t)_g_gyro_data->z;
             break;
 
         case REG_VELOCITY:
@@ -995,10 +1005,10 @@ void StartSensorTask(void *argument)
             MAFilter_Init(&accFilter);
 
 //          BNO055_Vector_t *accel = BNO055_GetAccel(&hbno055);
-            BNO055_Vector_t *lin_accel = BNO055_GetLinearAccel(&hbno055);
+            _g_lin_accel = BNO055_GetLinearAccel(&hbno055);
             BNO055_Quaternion_t *quat = BNO055_GetQuaternion(&hbno055);
             BNO055_Euler_t *euler = BNO055_GetEuler(&hbno055);
-            BNO055_Vector_t *gyro = BNO055_GetGyro(&hbno055);
+            _g_gyro_data = BNO055_GetGyro(&hbno055);
 
 //          DebugPrint("========IMU Data========\r\n");
 //          DebugPrint("Acceleration: %.2f, %.2f, %.2f\r\n", accel->x * 0.01f, accel->y * 0.01f, accel->z * 0.01f);
@@ -1007,7 +1017,7 @@ void StartSensorTask(void *argument)
 //          DebugPrint("Euler: %.2f, %.2f, %.2f\r\n", euler->heading, euler->roll, euler->pitch);
 //          DebugPrint("Gyro: %.2f, %.2f, %.2f\r\n", gyro->x * 0.01f, gyro->y * 0.01f, gyro->z * 0.01f);
 
-          if (!lin_accel || !quat || !euler || !gyro) return;
+          if (!_g_lin_accel || !quat || !euler || !_g_gyro_data) return;
 
           uint32_t now = HAL_GetTick();
           float dt = (last_tick == 0) ? SAMPLE_DT_DEFAULT : (now - last_tick) / 1000.0f;
@@ -1026,8 +1036,8 @@ void StartSensorTask(void *argument)
           float R11 = 1 - 2*x*x - 2*z*z;
 
           // scale LSB -> m/s^2 (BNO in m/s2 mode => 1 LSB = 0.01 m/s^2)
-          float ax = lin_accel->x * 0.01f;
-          float ay = lin_accel->z * 0.01f;
+          float ax = _g_lin_accel->x * 0.01f;
+          float ay = _g_lin_accel->z * 0.01f;
           // world frame (only x,y needed)
           float ax_w = R00*ax + R01*ay;
           float ay_w = R10*ax + R11*ay;
@@ -1064,7 +1074,7 @@ void StartSensorTask(void *argument)
           const float GYRO_THRESHOLD = 2.0f;   // deg/s (raw unit from BNO maybe LSB -> cần tùy)
           // Note: gyro in your code is raw LSB; you may convert to deg/s if needed.
           if (fabsf(a_forward_lp) < ACC_THRESHOLD &&
-              fabsf(gyro->x) < GYRO_THRESHOLD && fabsf(gyro->y) < GYRO_THRESHOLD && fabsf(gyro->z) < GYRO_THRESHOLD) {
+              fabsf(_g_gyro_data->x) < GYRO_THRESHOLD && fabsf(_g_gyro_data->y) < GYRO_THRESHOLD && fabsf(_g_gyro_data ->z) < GYRO_THRESHOLD) {
               // optionally require this condition persist N cycles before zeroing to avoid flicker
               zh_counter++;
               if (zh_counter >= 3) { // 3 cycles stable -> zero velocity
