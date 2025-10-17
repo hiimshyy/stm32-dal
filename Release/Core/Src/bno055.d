@@ -22,6 +22,8 @@ Core/Src/bno055.o: ../Core/Src/bno055.c ../Core/Inc/bno055.h \
  ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_flash_ex.h \
  ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_i2c.h \
  ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_pwr.h \
+ ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_tim.h \
+ ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_tim_ex.h \
  ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_uart.h
 ../Core/Inc/bno055.h:
 ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal.h:
@@ -47,4 +49,6 @@ Core/Src/bno055.o: ../Core/Src/bno055.c ../Core/Inc/bno055.h \
 ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_flash_ex.h:
 ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_i2c.h:
 ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_pwr.h:
+../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_tim.h:
+../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_tim_ex.h:
 ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_uart.h:

@@ -45,6 +45,8 @@
 /* Private variables ---------------------------------------------------------*/
 I2C_HandleTypeDef hi2c1;
 
+TIM_HandleTypeDef htim2;
+
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
 
@@ -55,24 +57,24 @@ const osThreadAttr_t defaultTask_attributes = {
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
+/* Definitions for modbusTask */
+osThreadId_t modbusTaskHandle;
+const osThreadAttr_t modbusTask_attributes = {
+  .name = "modbusTask",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
 /* Definitions for sensorTask */
 osThreadId_t sensorTaskHandle;
 const osThreadAttr_t sensorTask_attributes = {
   .name = "sensorTask",
-  .stack_size = 128 * 8,
-  .priority = (osPriority_t) osPriorityBelowNormal,
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
 };
 /* Definitions for nfcTask */
 osThreadId_t nfcTaskHandle;
 const osThreadAttr_t nfcTask_attributes = {
   .name = "nfcTask",
-  .stack_size = 128 * 4, // Giảm về 512 bytes
-  .priority = (osPriority_t) osPriorityLow, // Thử priority thấp hơn
-};
-/* Definitions for modbusTask */
-osThreadId_t modbusTaskHandle;
-const osThreadAttr_t modbusTask_attributes = {
-  .name = "modbusTask",
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
@@ -135,10 +137,11 @@ static void MX_GPIO_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_USART2_UART_Init(void);
+static void MX_TIM2_Init(void);
 void StartDefaultTask(void *argument);
+void StartModbusTask(void *argument);
 void StartSensorTask(void *argument);
 void StartNfcTask(void *argument);
-void StartModbusTask(void *argument);
 
 /* USER CODE BEGIN PFP */
 void SystemInit_Modules(void);
@@ -186,16 +189,18 @@ int main(void)
   MX_I2C1_Init();
   MX_USART1_UART_Init();
   MX_USART2_UART_Init();
+  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
   
   // Initialize modules
   SystemInit_Modules();
   
-  // Initialize Modbus RTU Slave
-  if (Modbus_Init(&hmodbus, &huart2, MODBUS_SLAVE_DEFAULT_ADDRESS) == HAL_OK) {
-    DebugPrint("Modbus RTU initialized on UART2\r\n");
+  // Initialize Modbus RTU Slave với TIM2 cho frame timeout
+  if (Modbus_Init(&hmodbus, &huart2, &htim2, MODBUS_SLAVE_DEFAULT_ADDRESS) == HAL_OK) {
+    DebugPrint("Modbus RTU initialized on UART2 with TIM2\r\n");
     DebugPrint("  Slave Address: %d\r\n", MODBUS_SLAVE_DEFAULT_ADDRESS);
     DebugPrint("  Baudrate: 115200\r\n");
+    DebugPrint("  Frame timeout: 5ms (T3.5)\r\n");
     
     // Register callbacks
     Modbus_RegisterReadCallback(&hmodbus, Modbus_OnRegisterRead);
@@ -243,9 +248,14 @@ int main(void)
   /* creation of defaultTask */
   defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
 
+  /* creation of modbusTask */
+  modbusTaskHandle = osThreadNew(StartModbusTask, NULL, &modbusTask_attributes);
 
   /* creation of sensorTask */
   sensorTaskHandle = osThreadNew(StartSensorTask, NULL, &sensorTask_attributes);
+
+  /* creation of nfcTask */
+  nfcTaskHandle = osThreadNew(StartNfcTask, NULL, &nfcTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* creation of modbusTask */
@@ -260,12 +270,6 @@ int main(void)
   systemEventsHandle = osEventFlagsNew(&systemEvents_attributes);
   /* USER CODE END RTOS_EVENTS */
 
-  /* creation of nfcTask - tạo sau khi có event flags */
-  nfcTaskHandle = osThreadNew(StartNfcTask, NULL, &nfcTask_attributes);
-  if (nfcTaskHandle == NULL) {
-	  DebugPrint("Failed to create nfcTask\r\n");
-  }
-  
   /* Start scheduler */
   osKernelStart();
 
@@ -358,6 +362,51 @@ static void MX_I2C1_Init(void)
 }
 
 /**
+  * @brief TIM2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 15;  // 16MHz / 16 = 1MHz (1us per tick)
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 5000;  // 5000us = 5ms (T3.5 cho baudrate 115200)
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM2_Init 2 */
+
+  /* USER CODE END TIM2_Init 2 */
+
+}
+
+/**
   * @brief USART1 Initialization Function
   * @param None
   * @retval None
@@ -442,30 +491,30 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
-  HAL_GPIO_WritePin(LED_MB_GPIO_Port, LED_MB_Pin, GPIO_PIN_RESET);
-  HAL_GPIO_WritePin(LED_FAULT_GPIO_Port, LED_FAULT_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOC, LED_Pin|LED_MB_Pin|LED_FAULT_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pin : LED_Pin */
-  GPIO_InitStruct.Pin = LED_Pin;
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(RL_FAULT_GPIO_Port, RL_FAULT_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pins : LED_Pin LED_MB_Pin LED_FAULT_Pin */
+  GPIO_InitStruct.Pin = LED_Pin|LED_MB_Pin|LED_FAULT_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(LED_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : LED_MB_Pin */
-  GPIO_InitStruct.Pin = LED_MB_Pin;
+  /*Configure GPIO pins : IN_4_Pin IN_3_Pin IN_2_Pin IN_1_Pin */
+  GPIO_InitStruct.Pin = IN_4_Pin|IN_3_Pin|IN_2_Pin|IN_1_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : RL_FAULT_Pin */
+  GPIO_InitStruct.Pin = RL_FAULT_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(LED_MB_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : LED_FAULT_Pin */
-  GPIO_InitStruct.Pin = LED_FAULT_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(LED_FAULT_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(RL_FAULT_GPIO_Port, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
@@ -576,9 +625,6 @@ void DebugPrint(const char* format, ...)
     HAL_UART_Transmit(&huart1, (uint8_t*)debug_buffer, strlen(debug_buffer), 100);
 }
 
-
-
-
 /**
  * @brief I2C Scanner to detect devices on the bus
  */
@@ -637,6 +683,189 @@ void I2C_Scanner(void)
                 DebugPrint("I2C error at expected address 0x%02X: %d\r\n", address, result);
             }
         }
+    }
+}
+
+void Modbus_OnRegisterRead(uint16_t addr, uint16_t *value)
+{
+    // Cập nhật các thanh ghi từ dữ liệu thực tế
+    switch (addr) {
+        // IMU Registers - lấy từ sensor_data[]
+        case REG_ACCEL_X:
+        case REG_ACCEL_Y:
+        case REG_ACCEL_Z:
+        case REG_GYRO_X:
+        case REG_GYRO_Y:
+        case REG_GYRO_Z:
+            if (addr <= 0x0008) {
+                *value = sensor_data[addr];
+            }
+            break;
+
+        case REG_VELOCITY:
+            // Velocity in m/s, scale by 100 (0.01 m/s resolution)
+            // Ví dụ: 1.23 m/s = 123
+            {
+                int16_t velocity_scaled = (int16_t)(current_velocity * 100.0f);
+                *value = (uint16_t)velocity_scaled;
+            }
+            break;
+
+        case REG_HEADING:
+            // Heading in degrees, scale by 10 (0.1 degree resolution)
+            // Ví dụ: 123.4 degrees = 1234
+            {
+                int16_t heading_scaled = (int16_t)(current_heading * 10.0f);
+                *value = (uint16_t)heading_scaled;
+            }
+            break;
+
+        case REG_IMU_STATUS:
+            *value = (system_status & 0x01) ? 1 : 0;
+            break;
+
+        case REG_IMU_ERROR:
+            *value = (system_error & 0x01) ? 1 : 0;
+            break;
+
+        // Digital Input Registers
+        case REG_DI_1:
+            *value = HAL_GPIO_ReadPin(IN_1_GPIO_Port, IN_1_Pin);
+            break;
+        case REG_DI_2:
+            *value = HAL_GPIO_ReadPin(IN_2_GPIO_Port, IN_2_Pin);
+            break;
+        case REG_DI_3:
+            *value = HAL_GPIO_ReadPin(IN_3_GPIO_Port, IN_3_Pin);
+            break;
+        case REG_DI_4:
+            *value = HAL_GPIO_ReadPin(IN_4_GPIO_Port, IN_4_Pin);
+            break;
+
+        case REG_DI_STATUS:
+            *value = (HAL_GPIO_ReadPin(IN_1_GPIO_Port, IN_1_Pin) << 0) |
+                     (HAL_GPIO_ReadPin(IN_2_GPIO_Port, IN_2_Pin) << 1) |
+                     (HAL_GPIO_ReadPin(IN_3_GPIO_Port, IN_3_Pin) << 2) |
+                     (HAL_GPIO_ReadPin(IN_4_GPIO_Port, IN_4_Pin) << 3);
+            break;
+
+        // PN532 NFC Registers
+        case REG_PN532_DATA_LOW:
+        case REG_PN532_DATA_HIGH:
+            // Không sử dụng - để trống
+            *value = 0;
+            break;
+
+        case REG_PN532_STATUS:
+            *value = (system_status & 0x02) ? 1 : 0;
+            break;
+
+        case REG_PN532_ERROR:
+            *value = (system_error & 0x02) ? 1 : 0;
+            break;
+
+        case REG_PN532_CARD_TYPE:
+            *value = nfc_card_present ? nfc_card_type : 0;
+            break;
+
+        case REG_PN532_CARD_UID_HIGH:
+            // 2 byte cao của UID (Big-Endian)
+            // Byte 0 (MSB) | Byte 1
+            if (nfc_card_present && nfc_card_uid_length >= 2) {
+                *value = (nfc_card_uid[0] << 8) | nfc_card_uid[1];
+            } else {
+                *value = 0;
+            }
+            break;
+
+        case REG_PN532_CARD_UID_LOW:
+            // 2 byte thấp của UID (Big-Endian)
+            // Byte 2 | Byte 3 (LSB)
+            if (nfc_card_present && nfc_card_uid_length >= 4) {
+                *value = (nfc_card_uid[2] << 8) | nfc_card_uid[3];
+            } else {
+                *value = 0;
+            }
+            break;
+
+        // System Registers
+        case REG_SYSTEM_STATUS:
+            *value = system_status;
+            break;
+
+        case REG_SYSTEM_ERROR:
+            *value = system_error;
+            break;
+
+        default:
+            // Giữ nguyên giá trị đã lưu trong thanh ghi
+            break;
+    }
+}
+
+/**
+ * @brief Callback được gọi khi Master ghi thanh ghi
+ */
+void Modbus_OnRegisterWrite(uint16_t addr, uint16_t value)
+{
+    switch (addr) {
+        case REG_DEVICE_ID:
+            // Thay đổi địa chỉ Modbus slave
+            if (value > 0 && value <= 247) {
+                hmodbus.slave_address = (uint8_t)value;
+                DebugPrint("Modbus slave address changed to: %d\r\n", value);
+            }
+            break;
+
+        case REG_CONFIG_BAUDRATE:
+            // Thay đổi baudrate
+            {
+                uint32_t new_baudrate;
+                switch (value) {
+                    case 1: new_baudrate = MODBUS_BAUD_9600; break;
+                    case 2: new_baudrate = MODBUS_BAUD_19200; break;
+                    case 3: new_baudrate = MODBUS_BAUD_38400; break;
+                    case 4: new_baudrate = MODBUS_BAUD_57600; break;
+                    case 5: new_baudrate = MODBUS_BAUD_115200; break;
+                    default: new_baudrate = MODBUS_BAUD_115200; break;
+                }
+                if (Modbus_SetConfig(&hmodbus, new_baudrate, hmodbus.parity, hmodbus.stopbits) == HAL_OK) {
+                    DebugPrint("Modbus baudrate changed to: %lu\r\n", new_baudrate);
+                }
+            }
+            break;
+
+        case REG_CONFIG_PARITY:
+            // Thay đổi parity
+            if (value <= 2) {
+                if (Modbus_SetConfig(&hmodbus, hmodbus.baudrate, (Modbus_Parity_t)value, hmodbus.stopbits) == HAL_OK) {
+                    DebugPrint("Modbus parity changed to: %d\r\n", value);
+                }
+            }
+            break;
+
+        case REG_CONFIG_STOP_BITS:
+            // Thay đổi stop bits
+            if (value == 1 || value == 2) {
+                if (Modbus_SetConfig(&hmodbus, hmodbus.baudrate, hmodbus.parity, (Modbus_StopBits_t)value) == HAL_OK) {
+                    DebugPrint("Modbus stop bits changed to: %d\r\n", value);
+                }
+            }
+            break;
+
+        case REG_RESET_ERROR_CMD:
+            // Reset error flags
+            if (value == 1) {
+                system_error = 0;
+                DebugPrint("System errors reset\r\n");
+                // Tắt LED_FAULT khi reset error
+                HAL_GPIO_WritePin(LED_FAULT_GPIO_Port, LED_FAULT_Pin, GPIO_PIN_RESET);
+            }
+            break;
+
+        default:
+            // Lưu giá trị vào thanh ghi mặc định
+            break;
     }
 }
 
@@ -708,6 +937,28 @@ void StartDefaultTask(void *argument)
   /* USER CODE END 5 */
 }
 
+/* USER CODE BEGIN Header_StartModbusTask */
+/**
+* @brief Function implementing the modbusTask thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartModbusTask */
+void StartModbusTask(void *argument)
+{
+  /* USER CODE BEGIN StartModbusTask */
+  DebugPrint("------Modbus Task Started------\r\n");
+  
+  /* Infinite loop */
+  for(;;)
+  {
+    // Process Modbus communication
+    Modbus_Process(&hmodbus);
+    
+    osDelay(1); // 1ms polling rate
+  }
+  /* USER CODE END StartModbusTask */
+}
 
 /* USER CODE BEGIN Header_StartSensorTask */
 /**
@@ -998,232 +1249,6 @@ void StartNfcTask(void *argument)
     osDelay(500);
   }
   /* USER CODE END StartNfcTask */
-}
-
-/* USER CODE BEGIN Header_StartModbusTask */
-/**
-* @brief Function implementing the modbusTask thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_StartModbusTask */
-void StartModbusTask(void *argument)
-{
-  /* USER CODE BEGIN StartModbusTask */
-  DebugPrint("------Modbus Task Started------\r\n");
-  
-  uint32_t stats_counter = 0;
-  uint32_t debug_counter = 0;
-  
-  /* Infinite loop */
-  for(;;)
-  {
-    // Process Modbus communication
-    Modbus_Process(&hmodbus);
-    
-    // Debug: Print state và rx_index mỗi 5 giây
-//    if (++debug_counter >= 5000) {
-//      DebugPrint("Modbus State: %d, RX Index: %d, UART State: %d\r\n",
-//                 hmodbus.state, hmodbus.rx_index, hmodbus.huart->RxState);
-//      debug_counter = 0;
-//    }
-//
-//    // Print statistics every 10 seconds
-//    if (++stats_counter >= 10000) {
-//      uint32_t requests, errors;
-//      Modbus_GetStats(&hmodbus, &requests, &errors);
-//      stats_counter = 0;
-//    }
-    
-    osDelay(1); // 1ms polling rate
-  }
-  /* USER CODE END StartModbusTask */
-}
-
-/**
- * @brief Callback được gọi khi Master đọc thanh ghi
- */
-void Modbus_OnRegisterRead(uint16_t addr, uint16_t *value)
-{
-    // Cập nhật các thanh ghi từ dữ liệu thực tế
-    switch (addr) {
-        // IMU Registers - lấy từ sensor_data[]
-        case REG_ACCEL_X:
-        case REG_ACCEL_Y:
-        case REG_ACCEL_Z:
-        case REG_GYRO_X:
-        case REG_GYRO_Y:
-        case REG_GYRO_Z:
-            if (addr <= 0x0008) {
-                *value = sensor_data[addr];
-            }
-            break;
-        
-        case REG_VELOCITY:
-            // Velocity in m/s, scale by 100 (0.01 m/s resolution)
-            // Ví dụ: 1.23 m/s = 123
-            {
-                int16_t velocity_scaled = (int16_t)(current_velocity * 100.0f);
-                *value = (uint16_t)velocity_scaled;
-            }
-            break;
-            
-        case REG_HEADING:
-            // Heading in degrees, scale by 10 (0.1 degree resolution)
-            // Ví dụ: 123.4 degrees = 1234
-            {
-                int16_t heading_scaled = (int16_t)(current_heading * 10.0f);
-                *value = (uint16_t)heading_scaled;
-            }
-            break;
-            
-        case REG_IMU_STATUS:
-            *value = (system_status & 0x01) ? 1 : 0;
-            break;
-            
-        case REG_IMU_ERROR:
-            *value = (system_error & 0x01) ? 1 : 0;
-            break;
-            
-        // Digital Input Registers
-        case REG_DI_1:
-            *value = HAL_GPIO_ReadPin(IN_1_GPIO_Port, IN_1_Pin);
-            break;
-        case REG_DI_2:
-            *value = HAL_GPIO_ReadPin(IN_2_GPIO_Port, IN_2_Pin);
-            break;
-        case REG_DI_3:
-            *value = HAL_GPIO_ReadPin(IN_3_GPIO_Port, IN_3_Pin);
-            break;
-        case REG_DI_4:
-            *value = HAL_GPIO_ReadPin(IN_4_GPIO_Port, IN_4_Pin);
-            break;
-            
-        case REG_DI_STATUS:
-            *value = (HAL_GPIO_ReadPin(IN_1_GPIO_Port, IN_1_Pin) << 0) |
-                     (HAL_GPIO_ReadPin(IN_2_GPIO_Port, IN_2_Pin) << 1) |
-                     (HAL_GPIO_ReadPin(IN_3_GPIO_Port, IN_3_Pin) << 2) |
-                     (HAL_GPIO_ReadPin(IN_4_GPIO_Port, IN_4_Pin) << 3);
-            break;
-            
-        // PN532 NFC Registers
-        case REG_PN532_DATA_LOW:
-        case REG_PN532_DATA_HIGH:
-            // Không sử dụng - để trống
-            *value = 0;
-            break;
-            
-        case REG_PN532_STATUS:
-            *value = (system_status & 0x02) ? 1 : 0;
-            break;
-            
-        case REG_PN532_ERROR:
-            *value = (system_error & 0x02) ? 1 : 0;
-            break;
-            
-        case REG_PN532_CARD_TYPE:
-            *value = nfc_card_present ? nfc_card_type : 0;
-            break;
-            
-        case REG_PN532_CARD_UID_HIGH:
-            // 2 byte cao của UID (Big-Endian)
-            // Byte 0 (MSB) | Byte 1
-            if (nfc_card_present && nfc_card_uid_length >= 2) {
-                *value = (nfc_card_uid[0] << 8) | nfc_card_uid[1];
-            } else {
-                *value = 0;
-            }
-            break;
-            
-        case REG_PN532_CARD_UID_LOW:
-            // 2 byte thấp của UID (Big-Endian)
-            // Byte 2 | Byte 3 (LSB)
-            if (nfc_card_present && nfc_card_uid_length >= 4) {
-                *value = (nfc_card_uid[2] << 8) | nfc_card_uid[3];
-            } else {
-                *value = 0;
-            }
-            break;
-            
-        // System Registers
-        case REG_SYSTEM_STATUS:
-            *value = system_status;
-            break;
-            
-        case REG_SYSTEM_ERROR:
-            *value = system_error;
-            break;
-            
-        default:
-            // Giữ nguyên giá trị đã lưu trong thanh ghi
-            break;
-    }
-}
-
-/**
- * @brief Callback được gọi khi Master ghi thanh ghi
- */
-void Modbus_OnRegisterWrite(uint16_t addr, uint16_t value)
-{
-    switch (addr) {
-        case REG_DEVICE_ID:
-            // Thay đổi địa chỉ Modbus slave
-            if (value > 0 && value <= 247) {
-                hmodbus.slave_address = (uint8_t)value;
-                DebugPrint("Modbus slave address changed to: %d\r\n", value);
-            }
-            break;
-            
-        case REG_CONFIG_BAUDRATE:
-            // Thay đổi baudrate
-            {
-                uint32_t new_baudrate;
-                switch (value) {
-                    case 1: new_baudrate = MODBUS_BAUD_9600; break;
-                    case 2: new_baudrate = MODBUS_BAUD_19200; break;
-                    case 3: new_baudrate = MODBUS_BAUD_38400; break;
-                    case 4: new_baudrate = MODBUS_BAUD_57600; break;
-                    case 5: new_baudrate = MODBUS_BAUD_115200; break;
-                    default: new_baudrate = MODBUS_BAUD_115200; break;
-                }
-                if (Modbus_SetConfig(&hmodbus, new_baudrate, hmodbus.parity, hmodbus.stopbits) == HAL_OK) {
-                    DebugPrint("Modbus baudrate changed to: %lu\r\n", new_baudrate);
-                }
-            }
-            break;
-            
-        case REG_CONFIG_PARITY:
-            // Thay đổi parity
-            if (value <= 2) {
-                if (Modbus_SetConfig(&hmodbus, hmodbus.baudrate, (Modbus_Parity_t)value, hmodbus.stopbits) == HAL_OK) {
-                    DebugPrint("Modbus parity changed to: %d\r\n", value);
-                }
-            }
-            break;
-            
-        case REG_CONFIG_STOP_BITS:
-            // Thay đổi stop bits
-            if (value == 1 || value == 2) {
-                if (Modbus_SetConfig(&hmodbus, hmodbus.baudrate, hmodbus.parity, (Modbus_StopBits_t)value) == HAL_OK) {
-                    DebugPrint("Modbus stop bits changed to: %d\r\n", value);
-                }
-            }
-            break;
-            
-        case REG_RESET_ERROR_CMD:
-            // Reset error flags
-            if (value == 1) {
-                system_error = 0;
-                DebugPrint("System errors reset\r\n");
-                // Tắt LED_FAULT khi reset error
-                HAL_GPIO_WritePin(LED_FAULT_GPIO_Port, LED_FAULT_Pin, GPIO_PIN_RESET);
-            }
-            break;
-            
-        default:
-            // Lưu giá trị vào thanh ghi mặc định
-            break;
-    }
 }
 
 /**

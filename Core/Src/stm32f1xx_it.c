@@ -57,6 +57,7 @@
 /* USER CODE END 0 */
 
 /* External variables --------------------------------------------------------*/
+extern TIM_HandleTypeDef htim2;
 extern UART_HandleTypeDef huart1;
 extern UART_HandleTypeDef huart2;
 /* USER CODE BEGIN EV */
@@ -184,6 +185,20 @@ void SysTick_Handler(void)
 /******************************************************************************/
 
 /**
+  * @brief This function handles TIM2 global interrupt.
+  */
+void TIM2_IRQHandler(void)
+{
+  /* USER CODE BEGIN TIM2_IRQn 0 */
+
+  /* USER CODE END TIM2_IRQn 0 */
+  HAL_TIM_IRQHandler(&htim2);
+  /* USER CODE BEGIN TIM2_IRQn 1 */
+
+  /* USER CODE END TIM2_IRQn 1 */
+}
+
+/**
   * @brief This function handles USART1 global interrupt.
   */
 void USART1_IRQHandler(void)
@@ -225,6 +240,17 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
         
         // Gọi callback Modbus để xử lý byte
         Modbus_UART_RxCallback(&hmodbus, received_byte);
+    }
+}
+
+/**
+ * @brief Timer Period Elapsed Callback (T3.5 frame timeout)
+ */
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+    if (htim->Instance == TIM2) {
+        // Gọi callback Modbus timeout
+        Modbus_TIM_TimeoutCallback(&hmodbus);
     }
 }
 /* USER CODE END 1 */

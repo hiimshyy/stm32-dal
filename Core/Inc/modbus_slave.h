@@ -68,6 +68,7 @@ typedef enum {
 // Modbus Handle Structure
 typedef struct {
     UART_HandleTypeDef *huart;
+    TIM_HandleTypeDef *htim;  // Timer for frame timeout detection
     uint8_t slave_address;
     uint16_t registers[MODBUS_REG_COUNT];
     
@@ -100,10 +101,11 @@ typedef struct {
  * @brief Initialize Modbus RTU Slave
  * @param hmodbus: Pointer to Modbus handle
  * @param huart: Pointer to UART handle (UART2)
+ * @param htim: Pointer to Timer handle (TIM2) for frame timeout detection
  * @param slave_addr: Modbus slave address (1-247)
  * @return HAL_StatusTypeDef
  */
-HAL_StatusTypeDef Modbus_Init(Modbus_Handle_t *hmodbus, UART_HandleTypeDef *huart, uint8_t slave_addr);
+HAL_StatusTypeDef Modbus_Init(Modbus_Handle_t *hmodbus, UART_HandleTypeDef *huart, TIM_HandleTypeDef *htim, uint8_t slave_addr);
 
 /**
  * @brief Set Modbus communication parameters
@@ -178,5 +180,11 @@ uint16_t Modbus_CRC16(uint8_t *buffer, uint16_t length);
  * @param errors: Pointer to store error count
  */
 void Modbus_GetStats(Modbus_Handle_t *hmodbus, uint32_t *requests, uint32_t *errors);
+
+/**
+ * @brief Timer callback for frame timeout detection (call from HAL_TIM_PeriodElapsedCallback)
+ * @param hmodbus: Pointer to Modbus handle
+ */
+void Modbus_TIM_TimeoutCallback(Modbus_Handle_t *hmodbus);
 
 #endif /* INC_MODBUS_SLAVE_H_ */
