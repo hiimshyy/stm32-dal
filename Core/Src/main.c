@@ -248,9 +248,6 @@ int main(void)
   /* creation of defaultTask */
   defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
 
-  /* creation of modbusTask */
-  modbusTaskHandle = osThreadNew(StartModbusTask, NULL, &modbusTask_attributes);
-
   /* creation of sensorTask */
   sensorTaskHandle = osThreadNew(StartSensorTask, NULL, &sensorTask_attributes);
 

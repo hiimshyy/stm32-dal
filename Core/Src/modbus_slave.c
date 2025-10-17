@@ -20,6 +20,9 @@ static void Modbus_HandleWriteMultipleRegisters(Modbus_Handle_t *hmodbus);
 static bool Modbus_VerifyCRC(uint8_t *buffer, uint16_t length);
 static HAL_StatusTypeDef Modbus_ReconfigureUART(Modbus_Handle_t *hmodbus);
 
+// Global variable để lưu single byte reception
+uint8_t modbus_rx_byte;
+
 /**
  * @brief Initialize Modbus RTU Slave
  */
@@ -54,10 +57,8 @@ HAL_StatusTypeDef Modbus_Init(Modbus_Handle_t *hmodbus, UART_HandleTypeDef *huar
     hmodbus->requests_processed = 0;
     hmodbus->errors_count = 0;
     
-    // Enable UART receive interrupt for single byte reception
-    HAL_UART_Receive_IT(hmodbus->huart, &hmodbus->rx_buffer[0], 1);
-    
-    // Timer sẽ được start khi nhận byte đầu tiên
+    // Enable UART receive interrupt - nhận vào biến static riêng
+    HAL_UART_Receive_IT(hmodbus->huart, &modbus_rx_byte, 1);
     
     return HAL_OK;
 }
@@ -124,8 +125,8 @@ static HAL_StatusTypeDef Modbus_ReconfigureUART(Modbus_Handle_t *hmodbus)
     status = HAL_UART_Init(hmodbus->huart);
     
     if (status == HAL_OK) {
-        // Restart receive interrupt
-        HAL_UART_Receive_IT(hmodbus->huart, &hmodbus->rx_buffer[0], 1);
+        // Restart receive interrupt vào biến static
+        HAL_UART_Receive_IT(hmodbus->huart, &modbus_rx_byte, 1);
     }
     
     return status;
@@ -170,52 +171,80 @@ static bool Modbus_VerifyCRC(uint8_t *buffer, uint16_t length)
 
 /**
  * @brief UART Receive Callback - call from HAL_UART_RxCpltCallback
+ * CHÚ Ý: Sử dụng single static byte để tránh buffer pointer issue
  */
 void Modbus_UART_RxCallback(Modbus_Handle_t *hmodbus, uint8_t byte)
 {
-    // Store received byte
-    if (hmodbus->rx_index < MODBUS_BUFFER_SIZE - 1) {
+    // Copy byte vào buffer
+    if (hmodbus->rx_index < MODBUS_BUFFER_SIZE) {
         hmodbus->rx_buffer[hmodbus->rx_index] = byte;
         hmodbus->rx_index++;
         hmodbus->last_byte_time = HAL_GetTick();
         hmodbus->state = MODBUS_STATE_RECEIVING;
-        
-        // Reset và restart timer cho frame timeout (T3.5)
-        __HAL_TIM_SET_COUNTER(hmodbus->htim, 0);
-        if (hmodbus->rx_index == 1) {
-            // Byte đầu tiên - start timer với interrupt
-            HAL_TIM_Base_Start_IT(hmodbus->htim);
-        }
-        
-        // Continue receiving next byte
-        HAL_UART_Receive_IT(hmodbus->huart, &hmodbus->rx_buffer[hmodbus->rx_index], 1);
     } else {
-        // Buffer overflow, reset
+        // Buffer overflow - reset
+        hmodbus->errors_count++;
         hmodbus->rx_index = 0;
-        HAL_TIM_Base_Stop_IT(hmodbus->htim);
-        HAL_UART_Receive_IT(hmodbus->huart, &hmodbus->rx_buffer[0], 1);
+        hmodbus->state = MODBUS_STATE_IDLE;
     }
+    
+    // LUÔN LUÔN restart receive vào biến static
+    // Điều này đảm bảo UART interrupt luôn chạy ổn định
+    HAL_UART_Receive_IT(hmodbus->huart, &modbus_rx_byte, 1);
 }
 
 /**
  * @brief Main Modbus processing function
- * Khi sử dụng timer, function này chỉ cần gọi nhẹ để check state
- * Frame timeout được xử lý bởi timer interrupt
+ * Sử dụng polling để check timeout - ĐƠN GIẢN và ỔN ĐỊNH nhất
  */
 void Modbus_Process(Modbus_Handle_t *hmodbus)
 {
-    // Với timer interrupt, chỉ cần check state SENDING
-    if (hmodbus->state == MODBUS_STATE_SENDING) {
-        // Wait for transmission to complete
-        if (hmodbus->huart->gState == HAL_UART_STATE_READY) {
-            hmodbus->state = MODBUS_STATE_IDLE;
-        }
-    }
+    uint32_t current_time = HAL_GetTick();
+    static uint32_t last_check_time = 0;
     
-    // Các state khác được xử lý bởi interrupt:
-    // - RECEIVING: Timer sẽ trigger khi timeout
-    // - PROCESSING: Xử lý trong timer callback
-    // - IDLE: Không cần làm gì
+    // Chỉ check mỗi 1ms để tránh overhead
+    if (current_time - last_check_time < 1) {
+        return;
+    }
+    last_check_time = current_time;
+    
+    switch (hmodbus->state) {
+        case MODBUS_STATE_RECEIVING:
+            // Check timeout (5ms cho T3.5)
+            if (current_time - hmodbus->last_byte_time >= 5) {
+                // Timeout - xử lý frame
+                if (hmodbus->rx_index > 0) {
+                    Modbus_ProcessFrame(hmodbus);
+                }
+                // Reset
+                hmodbus->rx_index = 0;
+                hmodbus->state = MODBUS_STATE_IDLE;
+            }
+            break;
+            
+        case MODBUS_STATE_SENDING:
+            // Wait for TX complete
+            if (hmodbus->huart->gState == HAL_UART_STATE_READY) {
+                hmodbus->state = MODBUS_STATE_IDLE;
+            }
+            break;
+            
+        case MODBUS_STATE_IDLE:
+        default:
+            // Watchdog: Kiểm tra UART RX interrupt có đang chạy không
+            if (hmodbus->huart->RxState != HAL_UART_STATE_BUSY_RX) {
+                // UART không nhận -> restart vào biến static
+                hmodbus->rx_index = 0;
+                HAL_UART_Receive_IT(hmodbus->huart, &modbus_rx_byte, 1);
+            }
+            
+            // Reset buffer nếu có data rác
+            if (hmodbus->rx_index > 0 && 
+                current_time - hmodbus->last_byte_time >= 100) {
+                hmodbus->rx_index = 0;
+            }
+            break;
+    }
 }
 
 /**
@@ -472,10 +501,15 @@ static void Modbus_SendResponse(Modbus_Handle_t *hmodbus)
     // Send response
     hmodbus->state = MODBUS_STATE_SENDING;
     HAL_UART_Transmit(hmodbus->huart, hmodbus->tx_buffer, hmodbus->tx_length, 100);
+    
+    // Reset buffer và state
+    hmodbus->rx_index = 0;
     hmodbus->state = MODBUS_STATE_IDLE;
     
     // Tắt LED_MB sau khi gửi response thành công
     HAL_GPIO_WritePin(LED_MB_GPIO_Port, LED_MB_Pin, GPIO_PIN_RESET);
+    
+    // UART interrupt đã chạy liên tục với biến static, không cần restart
 }
 
 /**
@@ -555,30 +589,12 @@ void Modbus_GetStats(Modbus_Handle_t *hmodbus, uint32_t *requests, uint32_t *err
 }
 
 /**
- * @brief Timer callback for frame timeout detection
- * Gọi từ HAL_TIM_PeriodElapsedCallback khi timer overflow (T3.5 timeout)
+ * @brief Timer callback - KHÔNG DÙNG NỮA
+ * Giữ lại để tương thích API, nhưng không làm gì
  */
 void Modbus_TIM_TimeoutCallback(Modbus_Handle_t *hmodbus)
 {
-    if (hmodbus == NULL) {
-        return;
-    }
-    
-    // Stop timer
-    HAL_TIM_Base_Stop_IT(hmodbus->htim);
-    
-    // Nếu đang nhận dữ liệu và có ít nhất 1 byte
-    if (hmodbus->state == MODBUS_STATE_RECEIVING && hmodbus->rx_index > 0) {
-        // Timeout xảy ra -> xử lý frame
-        hmodbus->state = MODBUS_STATE_PROCESSING;
-        Modbus_ProcessFrame(hmodbus);
-        
-        // Reset buffer
-        hmodbus->rx_index = 0;
-        hmodbus->state = MODBUS_STATE_IDLE;
-    } else {
-        // Timeout mà không có dữ liệu hoặc đang idle
-        hmodbus->rx_index = 0;
-        hmodbus->state = MODBUS_STATE_IDLE;
-    }
+    // Không sử dụng timer interrupt nữa
+    // Timeout được xử lý bằng polling trong Modbus_Process()
+    (void)hmodbus;  // Unused parameter
 }
