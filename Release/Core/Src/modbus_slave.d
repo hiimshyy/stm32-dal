@@ -24,7 +24,8 @@ Core/Src/modbus_slave.o: ../Core/Src/modbus_slave.c \
  ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_i2c.h \
  ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_pwr.h \
  ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_uart.h \
- ../Core/Inc/modbus_regs.h
+ ../Core/Inc/modbus_regs.h ../Core/Inc/main.h ../Core/Inc/pn532.h \
+ ../Core/Inc/bno055.h ../Core/Inc/filter.h ../Core/Inc/modbus_slave.h
 ../Core/Inc/modbus_slave.h:
 ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal.h:
 ../Core/Inc/stm32f1xx_hal_conf.h:
@@ -51,3 +52,8 @@ Core/Src/modbus_slave.o: ../Core/Src/modbus_slave.c \
 ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_pwr.h:
 ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_uart.h:
 ../Core/Inc/modbus_regs.h:
+../Core/Inc/main.h:
+../Core/Inc/pn532.h:
+../Core/Inc/bno055.h:
+../Core/Inc/filter.h:
+../Core/Inc/modbus_slave.h:

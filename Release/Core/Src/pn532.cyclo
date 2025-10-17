@@ -4,8 +4,8 @@
 ../Core/Src/pn532.c:363:6:sendCommandCheckAck	4
 ../Core/Src/pn532.c:304:6:SAMConfig	2
 ../Core/Src/pn532.c:87:6:wakeup	1
+../Core/Src/pn532.c:28:16:PN532_Init	3
 ../Core/Src/pn532.c:339:10:getFirmwareVersion	2
-../Core/Src/pn532.c:28:16:PN532_Init	6
 ../Core/Src/pn532.c:396:6:setPassiveActivationRetries	2
 ../Core/Src/pn532.c:455:6:startPassiveTargetIDDetection	1
 ../Core/Src/pn532.c:465:6:readDetectedPassiveTargetID	3

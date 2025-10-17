@@ -15,9 +15,8 @@
  #define REG_GYRO_X        0x0003  // Gyroscope X-axis data
  #define REG_GYRO_Y        0x0004  // Gyroscope Y-axis data
  #define REG_GYRO_Z        0x0005  // Gyroscope Z-axis data
- #define REG_MAG_X         0x0006  // Magnetometer X-axis data
- #define REG_MAG_Y         0x0007  // Magnetometer Y-axis data
- #define REG_MAG_Z         0x0008  // Magnetometer Z-axis data
+ #define REG_VELOCITY      0x0006  // Velocity data
+ #define REG_HEADING       0x0007  // Heading data
  #define REG_IMU_STATUS    0x0009  // IMU status
  #define REG_IMU_ERROR     0x000A  // IMU error
  
@@ -35,7 +34,8 @@
  #define REG_PN532_STATUS      0x0022  // PN532 status
  #define REG_PN532_ERROR       0x0023  // PN532 error
  #define REG_PN532_CARD_TYPE   0x0024  // PN532 card type
- #define REG_PN532_CARD_UID    0x0025  // PN532 card UID
+ #define REG_PN532_CARD_UID_HIGH 0x0025  // PN532 card UID (high word)
+ #define REG_PN532_CARD_UID_LOW 0x0026  // PN532 card UID (low word)
  
  // Config Registers
  #define REG_IMU_SAMPLE_RATE_CONFIG    0x0030  // Config IMU sample rate
@@ -55,8 +55,6 @@
  #define REG_SYSTEM_STATUS     0x0107  // System status (bit field)
  #define REG_SYSTEM_ERROR      0x0108  // System error (global error code)
  #define REG_RESET_ERROR_CMD   0x0109  // Reset error command (write 1 to reset all error flags)
- 
- 
  
  #endif /* INC_MODBUS_REGS_H_ */
  

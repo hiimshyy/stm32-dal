@@ -9,7 +9,7 @@
 #include <string.h>
 
 #define PN532_TIMEOUT (100) ///< Default timeout for PN532 communication
-//#define PN532DEBUG		1
+//#define PN532DEBUG	1
 //#define MIFAREDEBUG 	1
 
 uint8_t pn532ack[] = {0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00}; ///< ACK message from PN532
@@ -43,21 +43,21 @@ PN532_Status_t PN532_Init(PN532_Config* config)
     // Wakeup
     wakeup();
 
-    // Verify firmware version
-    uint32_t versiondata = getFirmwareVersion();
-    if (!versiondata) {
-        if (_config->log) {
-            _config->log("[PN532] - Failed to get firmware version\r\n");
-        }
-        return PN532_STATUS_ERROR;
-    }
+    // // Verify firmware version
+    // uint32_t versiondata = getFirmwareVersion();
+    // if (!versiondata) {
+    //     if (_config->log) {
+    //         _config->log("[PN532] - Failed to get firmware version\r\n");
+    //     }
+    //     return PN532_STATUS_ERROR;
+    // }
 
-    if (_config->log) {
-        _config->log("[PN532] - Found chip PN5");
-        _config->log("%02X\r\n", (versiondata >> 24) & 0xFF);
-        _config->log("[PN532] - Firmware ver. %d.", (versiondata >> 16) & 0xFF);
-        _config->log("%d\r\n", (versiondata >> 8) & 0xFF);
-    }
+    // if (_config->log) {
+    //     _config->log("[PN532] - Found chip PN5");
+    //     _config->log("%02X\r\n", (versiondata >> 24) & 0xFF);
+    //     _config->log("[PN532] - Firmware ver. %d.", (versiondata >> 16) & 0xFF);
+    //     _config->log("%d\r\n", (versiondata >> 8) & 0xFF);
+    // }
 
     return PN532_STATUS_OK;
 }

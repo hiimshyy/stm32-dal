@@ -97,6 +97,10 @@ uint8_t system_status = 0;
 uint8_t system_error = 0;
 bool sensors_initialized = false;
 
+// IMU velocity and heading data
+float current_velocity = 0.0f;  // m/s
+float current_heading = 0.0f;   // degrees
+
 // Debug buffer
 char debug_buffer[128];
 
@@ -439,6 +443,8 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(LED_MB_GPIO_Port, LED_MB_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(LED_FAULT_GPIO_Port, LED_FAULT_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : LED_Pin */
   GPIO_InitStruct.Pin = LED_Pin;
@@ -446,6 +452,20 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(LED_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : LED_MB_Pin */
+  GPIO_InitStruct.Pin = LED_MB_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(LED_MB_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : LED_FAULT_Pin */
+  GPIO_InitStruct.Pin = LED_FAULT_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(LED_FAULT_GPIO_Port, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
@@ -505,6 +525,7 @@ void SystemInit_Modules(void)
             DebugPrint("  -> Wrong chip ID: 0x%02X (expected 0x%02X)\r\n", error_code, BNO055_ID);
         }
         system_error |= 0x01; // IMU Error
+        HAL_GPIO_WritePin(LED_FAULT_GPIO_Port, LED_FAULT_Pin, GPIO_PIN_SET);
     }
     
     // Initialize PN532 NFC/RFID with retry mechanism
@@ -671,6 +692,15 @@ void StartDefaultTask(void *argument)
             system_error &= ~0x02;
         }
     }
+    
+    // Cập nhật LED_FAULT dựa trên system_error
+    if (system_error != 0) {
+        // Có lỗi -> Bật LED_FAULT
+        HAL_GPIO_WritePin(LED_FAULT_GPIO_Port, LED_FAULT_Pin, GPIO_PIN_SET);
+    } else {
+        // Không có lỗi -> Tắt LED_FAULT
+        HAL_GPIO_WritePin(LED_FAULT_GPIO_Port, LED_FAULT_Pin, GPIO_PIN_RESET);
+    }
 
     HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
     osDelay(500); // Slower blink
@@ -799,6 +829,10 @@ void StartSensorTask(void *argument)
           // optional: limit v to reasonable bounds (e.g., -50..+50 m/s)
           if (v > 50.0f) v = 50.0f;
           if (v < -50.0f) v = -50.0f;
+          
+          // Cập nhật velocity và heading vào biến global
+          current_velocity = v;
+          current_heading = euler->heading;
 
           // Debug print
 //          DebugPrint("a_fwd: %.3f (lp %.3f) dt: %.3f => v: %.3f m/s | heading: %.2f\r\n",
@@ -817,9 +851,10 @@ void StartSensorTask(void *argument)
 
         	// Chỉ báo lỗi hệ thống sau nhiều lần fail liên tiếp
         	if (consecutive_failures >= MAX_CONSECUTIVE_FAILURES) {
-				system_error |= 0x01; // Set IMU error
-				osEventFlagsSet(systemEventsHandle, EVENT_SYSTEM_ERROR);
-				consecutive_failures = 0; // Reset counter
+			system_error |= 0x01; // Set IMU error
+			HAL_GPIO_WritePin(LED_FAULT_GPIO_Port, LED_FAULT_Pin, GPIO_PIN_SET);
+			osEventFlagsSet(systemEventsHandle, EVENT_SYSTEM_ERROR);
+			consecutive_failures = 0; // Reset counter
         	}
         }
         osMutexRelease(dataMutexHandle);
@@ -847,6 +882,13 @@ void StartNfcTask(void *argument)
   // Wait for system initialization with timeout
   osEventFlagsWait(systemEventsHandle, EVENT_SENSOR_DATA_READY, osFlagsWaitAny, 10000);
 
+  uint32_t firmware_version = getFirmwareVersion();
+  if (firmware_version) {
+    DebugPrint("PN532 firmware version: %d\r\n", firmware_version);
+  } else {
+    DebugPrint("Failed to get firmware version\r\n");
+  }
+
   if (setPassiveActivationRetries(0xFF)) {
     DebugPrint("PN532 passive retries configured\r\n");
   } else {
@@ -855,9 +897,9 @@ void StartNfcTask(void *argument)
 
   // SAMConfig
   if (!SAMConfig()) {
-      DebugPrint("PN532 SAMConfig successful\r\n");
-  } else {
       DebugPrint("PN532 SAMConfig failed\r\n");
+  } else {
+      DebugPrint("PN532 SAMConfig successful\r\n");
   }
   /* Infinite loop */
   for(;;)
@@ -980,19 +1022,18 @@ void StartModbusTask(void *argument)
     Modbus_Process(&hmodbus);
     
     // Debug: Print state và rx_index mỗi 5 giây
-    if (++debug_counter >= 5000) {
-      DebugPrint("Modbus State: %d, RX Index: %d, UART State: %d\r\n", 
-                 hmodbus.state, hmodbus.rx_index, hmodbus.huart->RxState);
-      debug_counter = 0;
-    }
-    
-    // Print statistics every 10 seconds
-    if (++stats_counter >= 10000) {
-      uint32_t requests, errors;
-      Modbus_GetStats(&hmodbus, &requests, &errors);
-      DebugPrint("Modbus Stats - Requests: %lu, Errors: %lu\r\n", requests, errors);
-      stats_counter = 0;
-    }
+//    if (++debug_counter >= 5000) {
+//      DebugPrint("Modbus State: %d, RX Index: %d, UART State: %d\r\n",
+//                 hmodbus.state, hmodbus.rx_index, hmodbus.huart->RxState);
+//      debug_counter = 0;
+//    }
+//
+//    // Print statistics every 10 seconds
+//    if (++stats_counter >= 10000) {
+//      uint32_t requests, errors;
+//      Modbus_GetStats(&hmodbus, &requests, &errors);
+//      stats_counter = 0;
+//    }
     
     osDelay(1); // 1ms polling rate
   }
@@ -1013,11 +1054,26 @@ void Modbus_OnRegisterRead(uint16_t addr, uint16_t *value)
         case REG_GYRO_X:
         case REG_GYRO_Y:
         case REG_GYRO_Z:
-        case REG_MAG_X:
-        case REG_MAG_Y:
-        case REG_MAG_Z:
             if (addr <= 0x0008) {
                 *value = sensor_data[addr];
+            }
+            break;
+        
+        case REG_VELOCITY:
+            // Velocity in m/s, scale by 100 (0.01 m/s resolution)
+            // Ví dụ: 1.23 m/s = 123
+            {
+                int16_t velocity_scaled = (int16_t)(current_velocity * 100.0f);
+                *value = (uint16_t)velocity_scaled;
+            }
+            break;
+            
+        case REG_HEADING:
+            // Heading in degrees, scale by 10 (0.1 degree resolution)
+            // Ví dụ: 123.4 degrees = 1234
+            {
+                int16_t heading_scaled = (int16_t)(current_heading * 10.0f);
+                *value = (uint16_t)heading_scaled;
             }
             break;
             
@@ -1052,19 +1108,9 @@ void Modbus_OnRegisterRead(uint16_t addr, uint16_t *value)
             
         // PN532 NFC Registers
         case REG_PN532_DATA_LOW:
-            if (nfc_card_present && nfc_card_uid_length >= 4) {
-                *value = (nfc_card_uid[1] << 8) | nfc_card_uid[0];
-            } else {
-                *value = 0;
-            }
-            break;
-            
         case REG_PN532_DATA_HIGH:
-            if (nfc_card_present && nfc_card_uid_length >= 4) {
-                *value = (nfc_card_uid[3] << 8) | nfc_card_uid[2];
-            } else {
-                *value = 0;
-            }
+            // Không sử dụng - để trống
+            *value = 0;
             break;
             
         case REG_PN532_STATUS:
@@ -1079,8 +1125,24 @@ void Modbus_OnRegisterRead(uint16_t addr, uint16_t *value)
             *value = nfc_card_present ? nfc_card_type : 0;
             break;
             
-        case REG_PN532_CARD_UID:
-            *value = nfc_card_present ? nfc_card_uid_length : 0;
+        case REG_PN532_CARD_UID_HIGH:
+            // 2 byte cao của UID (Big-Endian)
+            // Byte 0 (MSB) | Byte 1
+            if (nfc_card_present && nfc_card_uid_length >= 2) {
+                *value = (nfc_card_uid[0] << 8) | nfc_card_uid[1];
+            } else {
+                *value = 0;
+            }
+            break;
+            
+        case REG_PN532_CARD_UID_LOW:
+            // 2 byte thấp của UID (Big-Endian)
+            // Byte 2 | Byte 3 (LSB)
+            if (nfc_card_present && nfc_card_uid_length >= 4) {
+                *value = (nfc_card_uid[2] << 8) | nfc_card_uid[3];
+            } else {
+                *value = 0;
+            }
             break;
             
         // System Registers
@@ -1153,6 +1215,8 @@ void Modbus_OnRegisterWrite(uint16_t addr, uint16_t value)
             if (value == 1) {
                 system_error = 0;
                 DebugPrint("System errors reset\r\n");
+                // Tắt LED_FAULT khi reset error
+                HAL_GPIO_WritePin(LED_FAULT_GPIO_Port, LED_FAULT_Pin, GPIO_PIN_RESET);
             }
             break;
             

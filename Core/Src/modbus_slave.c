@@ -6,6 +6,7 @@
  */
 
 #include "modbus_slave.h"
+#include "main.h"
 #include <string.h>
 
 // Private function prototypes
@@ -251,6 +252,9 @@ static void Modbus_ProcessFrame(Modbus_Handle_t *hmodbus)
         return;
     }
     
+    // Bật LED_MB khi nhận frame thành công
+    HAL_GPIO_WritePin(LED_MB_GPIO_Port, LED_MB_Pin, GPIO_PIN_SET);
+    
     // Extract function code
     uint8_t function_code = hmodbus->rx_buffer[1];
     
@@ -479,6 +483,9 @@ static void Modbus_SendResponse(Modbus_Handle_t *hmodbus)
     hmodbus->state = MODBUS_STATE_SENDING;
     HAL_UART_Transmit(hmodbus->huart, hmodbus->tx_buffer, hmodbus->tx_length, 100);
     hmodbus->state = MODBUS_STATE_IDLE;
+    
+    // Tắt LED_MB sau khi gửi response thành công
+    HAL_GPIO_WritePin(LED_MB_GPIO_Port, LED_MB_Pin, GPIO_PIN_RESET);
 }
 
 /**
