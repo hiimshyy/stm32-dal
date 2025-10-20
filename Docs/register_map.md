@@ -14,18 +14,18 @@ Module DAL (Data Acquisition and Logging) sử dụng giao thức Modbus RTU qua
 ## 1. IMU Registers (0x0000 - 0x000A)
 Dữ liệu từ cảm biến BNO055 IMU
 
-| Địa chỉ (Dec) | Địa chỉ (Hex) | Tên | Mô tả | Đơn vị | R/W | Kiểu dữ liệu |
-|---------------|---------------|-----|-------|--------|-----|--------------|
-| 0 | 0x0000 | REG_ACCEL_X | Gia tốc trục X | LSB | R | uint16 |
-| 1 | 0x0001 | REG_ACCEL_Y | Gia tốc trục Y | LSB | R | uint16 |
-| 2 | 0x0002 | REG_ACCEL_Z | Gia tốc trục Z | LSB | R | uint16 |
-| 3 | 0x0003 | REG_GYRO_X | Gyroscope trục X | LSB | R | uint16 |
-| 4 | 0x0004 | REG_GYRO_Y | Gyroscope trục Y | LSB | R | uint16 |
-| 5 | 0x0005 | REG_GYRO_Z | Gyroscope trục Z | LSB | R | uint16 |
-| 6 | 0x0006 | REG_VELOCITY | Vận tốc thiết bị | 0.01 m/s | R | int16 |
-| 7 | 0x0007 | REG_HEADING | Hướng thiết bị | 0.1° | R | uint16 |
-| 9 | 0x0009 | REG_IMU_STATUS | Trạng thái IMU | Bit field | R | uint16 |
-| 10 | 0x000A | REG_IMU_ERROR | Lỗi IMU | Bit field | R | uint16 |
+| Địa chỉ (Dec) | Địa chỉ (Hex) | Tên | Mô tả | Đơn vị | R/W | Kiểu dữ liệu | Scale |
+|---------------|---------------|-----|-------|--------|-----|--------------|--------|
+| 0 | 0x0000 | REG_ACCEL_X | Gia tốc trục X | LSB | R | uint16 | - |
+| 1 | 0x0001 | REG_ACCEL_Y | Gia tốc trục Y | LSB | R | uint16 | - |
+| 2 | 0x0002 | REG_ACCEL_Z | Gia tốc trục Z | LSB | R | uint16 | - |
+| 3 | 0x0003 | REG_GYRO_X | Gyroscope trục X | LSB | R | uint16 | - |
+| 4 | 0x0004 | REG_GYRO_Y | Gyroscope trục Y | LSB | R | uint16 | - |
+| 5 | 0x0005 | REG_GYRO_Z | Gyroscope trục Z | LSB | R | uint16 | - |
+| 6 | 0x0006 | REG_VELOCITY | Vận tốc thiết bị | 0.01 m/s | R | int16 | /100 |
+| 7 | 0x0007 | REG_HEADING | Hướng thiết bị | 0.1° | R | uint16 | /10 |
+| 9 | 0x0009 | REG_IMU_STATUS | Trạng thái IMU | Bit field | R | uint16 | - |
+| 10 | 0x000A | REG_IMU_ERROR | Lỗi IMU | Bit field | R | uint16 | - |
 
 ### Chi tiết:
 
