@@ -163,7 +163,7 @@ Thông tin hệ thống và cấu hình Modbus
 | 257 | 0x0101 | REG_CONFIG_BAUDRATE | Cấu hình baudrate | 1-5 | R/W | uint16 |
 | 258 | 0x0102 | REG_CONFIG_PARITY | Cấu hình parity | 0-2 | R/W | uint16 |
 | 259 | 0x0103 | REG_CONFIG_STOP_BITS | Cấu hình stop bits | 1-2 | R/W | uint16 |
-| 260 | 0x0104 | REG_MODULE_TYPE | Loại module | 0x0002 | R | uint16 |
+| 260 | 0x0104 | REG_MODULE_TYPE | Loại module | 0x0004 | R | uint16 |
 | 261 | 0x0105 | REG_FIRMWARE_VERSION | Phiên bản firmware | 0x0101 | R | uint16 |
 | 262 | 0x0106 | REG_HARDWARE_VERSION | Phiên bản hardware | 0x0101 | R | uint16 |
 | 263 | 0x0107 | REG_SYSTEM_STATUS | Trạng thái hệ thống | Bit field | R | uint16 |

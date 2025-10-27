@@ -33,7 +33,7 @@
 #define MODBUS_EXCEPTION_SLAVE_DEVICE_FAILURE   0x04
 
 // Modbus Register Map Size
-#define MODBUS_REG_COUNT                256
+#define MODBUS_REG_COUNT                300
 
 // Modbus Baudrate Options
 typedef enum {

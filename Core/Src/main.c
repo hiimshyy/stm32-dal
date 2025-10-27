@@ -210,7 +210,7 @@ int main(void)
     
     // Initialize system registers with default values
     Modbus_WriteRegister(&hmodbus, REG_DEVICE_ID, MODBUS_SLAVE_DEFAULT_ADDRESS);
-    Modbus_WriteRegister(&hmodbus, REG_MODULE_TYPE, 0x0002);
+    Modbus_WriteRegister(&hmodbus, REG_MODULE_TYPE, 0x0004);
     Modbus_WriteRegister(&hmodbus, REG_FIRMWARE_VERSION, 0x0101);
     Modbus_WriteRegister(&hmodbus, REG_HARDWARE_VERSION, 0x0101);
     Modbus_WriteRegister(&hmodbus, REG_CONFIG_BAUDRATE, 5); // 115200
@@ -219,10 +219,6 @@ int main(void)
   } else {
     DebugPrint("Modbus initialization failed!\r\n");
   }
-  
-  DebugPrint("DAL Module Started\r\n");
-  DebugPrint("Firmware Version: v1.01\r\n");
-  DebugPrint("Hardware Version: v1.01\r\n");
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -796,10 +792,37 @@ void Modbus_OnRegisterRead(uint16_t addr, uint16_t *value)
             break;
 
         // System Registers
+        case REG_DEVICE_ID:
+            *value = hmodbus.slave_address;
+            break;
+        case REG_CONFIG_BAUDRATE:
+            switch (hmodbus.baudrate) {
+                case MODBUS_BAUD_9600:   *value = 1; break;
+                case MODBUS_BAUD_19200:  *value = 2; break;
+                case MODBUS_BAUD_38400:  *value = 3; break;
+                case MODBUS_BAUD_57600:  *value = 4; break;
+                case MODBUS_BAUD_115200: *value = 5; break;
+                default:                 *value = 5; break;
+            }
+            break;
+        case REG_CONFIG_PARITY:
+            *value = (uint16_t)hmodbus.parity;
+            break;
+        case REG_CONFIG_STOP_BITS:
+            *value = (uint16_t)hmodbus.stopbits;
+            break;
+        case REG_MODULE_TYPE:
+            *value = 0x0004; // DAL Module
+            break;
+        case REG_FIRMWARE_VERSION:
+            *value = 0x0101; // v1.01
+            break;
+        case REG_HARDWARE_VERSION:
+            *value = 0x0101; // v1.01
+            break;
         case REG_SYSTEM_STATUS:
             *value = system_status;
             break;
-
         case REG_SYSTEM_ERROR:
             *value = system_error;
             break;
@@ -817,7 +840,6 @@ void Modbus_OnRegisterWrite(uint16_t addr, uint16_t value)
 {
     switch (addr) {
         case REG_DEVICE_ID:
-            // Thay đổi địa chỉ Modbus slave
             if (value > 0 && value <= 247) {
                 hmodbus.slave_address = (uint8_t)value;
                 DebugPrint("Modbus slave address changed to: %d\r\n", value);
@@ -825,7 +847,6 @@ void Modbus_OnRegisterWrite(uint16_t addr, uint16_t value)
             break;
 
         case REG_CONFIG_BAUDRATE:
-            // Thay đổi baudrate
             {
                 uint32_t new_baudrate;
                 switch (value) {
@@ -843,7 +864,6 @@ void Modbus_OnRegisterWrite(uint16_t addr, uint16_t value)
             break;
 
         case REG_CONFIG_PARITY:
-            // Thay đổi parity
             if (value <= 2) {
                 if (Modbus_SetConfig(&hmodbus, hmodbus.baudrate, (Modbus_Parity_t)value, hmodbus.stopbits) == HAL_OK) {
                     DebugPrint("Modbus parity changed to: %d\r\n", value);
