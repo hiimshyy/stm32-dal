@@ -63,7 +63,7 @@
          return BNO055_STATUS_ERROR;
      }
      
-//      Wait for reset
+//   Wait for reset
       HAL_Delay(650);
      
      // Wait for chip to be ready
@@ -90,15 +90,15 @@
          return BNO055_STATUS_ERROR;
      }
      
-     // Set units (m/s², °/s, °C, degrees)
-     if (BNO055_WriteRegister(hbno055, BNO055_UNIT_SEL_ADDR, 0x00) != BNO055_STATUS_OK) {
-         return BNO055_STATUS_ERROR;
-     }
-     
-     // Set to NDOF mode (9DOF fusion)
-     if (BNO055_SetOperationMode(hbno055, BNO055_OPERATION_MODE_NDOF) != BNO055_STATUS_OK) {
-         return BNO055_STATUS_ERROR;
-     }
+    // Set units (m/s², °/s, °C, degrees)
+    if (BNO055_WriteRegister(hbno055, BNO055_UNIT_SEL_ADDR, 0x00) != BNO055_STATUS_OK) {
+        return BNO055_STATUS_ERROR;
+    }
+    
+    // Set to IMUPLUS mode (6DOF fusion - Accel + Gyro only, no Magnetometer)
+    if (BNO055_SetOperationMode(hbno055, BNO055_OPERATION_MODE_IMUPLUS) != BNO055_STATUS_OK) {
+        return BNO055_STATUS_ERROR;
+    }
      
      hbno055->initialized = true;
      hbno055->status = BNO055_STATUS_OK;

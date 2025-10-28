@@ -95,8 +95,8 @@ bool nfc_card_present = false;
 uint32_t nfc_last_card_uid = 0; // For detecting card changes
 
 // Status variables
-uint8_t system_status = 0;
-uint8_t system_error = 0;
+volatile uint8_t system_status = 0;
+volatile uint8_t system_error = 0;
 bool sensors_initialized = false;
 
 // IMU velocity and heading data
@@ -195,6 +195,7 @@ int main(void)
   /* USER CODE BEGIN 2 */
   
   // Initialize modules
+  HAL_Delay(1000);
   SystemInit_Modules();
   
   // Initialize Modbus RTU Slave với TIM2 cho frame timeout
@@ -549,9 +550,9 @@ void SystemInit_Modules(void)
         DebugPrint("BNO055 initialized successfully\r\n");
         
         // Check BNO055 operational status
-        uint8_t sys_stat, sys_err;
-        if (BNO055_ReadSystemStatus(&hbno055, &sys_stat, &sys_err) == BNO055_STATUS_OK) {
-            DebugPrint("  System Status: 0x%02X, System Error: 0x%02X\r\n", sys_stat, sys_err);
+        uint8_t imu_status, imu_err;
+        if (BNO055_ReadSystemStatus(&hbno055, &imu_status, &imu_err) == BNO055_STATUS_OK) {
+            DebugPrint("  IMU Status: 0x%02X, IMU Error: 0x%02X\r\n", imu_status, imu_err);
         }
         
         // Check operation mode
@@ -670,7 +671,7 @@ void I2C_Scanner(void)
             } else if (address == PN532_I2C_ADDRESS) {
                 DebugPrint("  -> PN532 NFC/RFID detected\r\n");
             } else {
-                DebugPrint("  -> Unknown device (possibly EEPROM, RTC, or other I2C device)\r\n");
+                DebugPrint("  -> Unknown device\r\n");
             }
         } else if (result != HAL_TIMEOUT) {
             // Log other errors (not timeout which is expected for empty addresses)
@@ -685,7 +686,6 @@ void Modbus_OnRegisterRead(uint16_t addr, uint16_t *value)
 {
     // Cập nhật các thanh ghi từ dữ liệu thực tế
     switch (addr) {
-        // IMU Registers - lấy từ sensor_data[]
         case REG_ACCEL_X:
             *value = (uint16_t)_g_lin_accel->x;
             break;
@@ -706,21 +706,13 @@ void Modbus_OnRegisterRead(uint16_t addr, uint16_t *value)
             break;
 
         case REG_VELOCITY:
-            // Velocity in m/s, scale by 100 (0.01 m/s resolution)
-            // Ví dụ: 1.23 m/s = 123
-            {
-                int16_t velocity_scaled = (int16_t)(current_velocity * 100.0f);
-                *value = (uint16_t)velocity_scaled;
-            }
+            int16_t velocity_scaled = (int16_t)(current_velocity * 100.0f);
+            *value = (uint16_t)velocity_scaled;
             break;
 
         case REG_HEADING:
-            // Heading in degrees, scale by 10 (0.1 degree resolution)
-            // Ví dụ: 123.4 degrees = 1234
-            {
-                int16_t heading_scaled = (int16_t)(current_heading * 10.0f);
-                *value = (uint16_t)heading_scaled;
-            }
+            int16_t heading_scaled = (int16_t)(current_heading * 10.0f);
+            *value = (uint16_t)heading_scaled;
             break;
 
         case REG_IMU_STATUS:
@@ -923,7 +915,8 @@ void StartDefaultTask(void *argument)
                                       osFlagsWaitAny, 
                                       1000);
     
-    if (events & EVENT_SYSTEM_ERROR) {
+    // Kiểm tra nếu có lỗi thực sự (không phải timeout)
+    if ((events != osFlagsErrorTimeout) && (events & EVENT_SYSTEM_ERROR)) {
         // Check cooldown
         if (HAL_GetTick() - recovery_cooldown < 10000) { // 10 second cooldown
             osEventFlagsClear(systemEventsHandle, EVENT_SYSTEM_ERROR);
@@ -949,13 +942,12 @@ void StartDefaultTask(void *argument)
         }
     }
     
-    // Cập nhật LED_FAULT dựa trên system_error
     if (system_error != 0) {
-        // Có lỗi -> Bật LED_FAULT
         HAL_GPIO_WritePin(LED_FAULT_GPIO_Port, LED_FAULT_Pin, GPIO_PIN_SET);
+        HAL_GPIO_WritePin(RL_FAULT_GPIO_Port, RL_FAULT_Pin, GPIO_PIN_SET);
     } else {
-        // Không có lỗi -> Tắt LED_FAULT
         HAL_GPIO_WritePin(LED_FAULT_GPIO_Port, LED_FAULT_Pin, GPIO_PIN_RESET);
+        HAL_GPIO_WritePin(RL_FAULT_GPIO_Port, RL_FAULT_Pin, GPIO_PIN_RESET);
     }
 
     HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
@@ -981,7 +973,6 @@ void StartModbusTask(void *argument)
   {
     // Process Modbus communication
     Modbus_Process(&hmodbus);
-    
     osDelay(1); // 1ms polling rate
   }
   /* USER CODE END StartModbusTask */
