@@ -198,6 +198,7 @@ void TIM2_IRQHandler(void)
   /* USER CODE END TIM2_IRQn 1 */
 }
 
+#ifdef DEBUG_ENABLE
 /**
   * @brief This function handles USART1 global interrupt.
   */
@@ -211,6 +212,7 @@ void USART1_IRQHandler(void)
 
   /* USER CODE END USART1_IRQn 1 */
 }
+#endif
 
 /**
   * @brief This function handles USART2 global interrupt.

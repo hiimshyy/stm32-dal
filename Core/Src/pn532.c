@@ -9,7 +9,7 @@
 #include <string.h>
 
 #define PN532_TIMEOUT (100) ///< Default timeout for PN532 communication
-//#define PN532DEBUG	1
+//#define PN532DEBUG    1
 //#define MIFAREDEBUG 	1
 
 uint8_t pn532ack[] = {0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00}; ///< ACK message from PN532
@@ -31,10 +31,11 @@ PN532_Status_t PN532_Init(PN532_Config* config)
     if (_config == NULL) {
         return PN532_STATUS_ERROR;
     }
-
+#ifdef PN532DEBUG
     if (_config->log) {
         _config->log("[PN532] - Initializing...\r\n");
     }
+#endif
 
     // Reset nếu có chân reset
     reset();

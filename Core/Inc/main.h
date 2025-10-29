@@ -86,7 +86,7 @@ extern TIM_HandleTypeDef htim2;
 #define RL_FAULT_GPIO_Port GPIOA
 
 /* USER CODE BEGIN Private defines */
-
+//#define DEBUG_ENABLE 0
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus

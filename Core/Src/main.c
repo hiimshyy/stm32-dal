@@ -46,8 +46,9 @@
 I2C_HandleTypeDef hi2c1;
 
 TIM_HandleTypeDef htim2;
-
+#ifdef DEBUG_ENABLE
 UART_HandleTypeDef huart1;
+#endif
 UART_HandleTypeDef huart2;
 
 /* Definitions for defaultTask */
@@ -104,13 +105,15 @@ float current_velocity = 0.0f;  // m/s
 float current_heading = 0.0f;   // degrees
 
 // Debug buffer
+#ifdef DEBUG_ENABLE
 char debug_buffer[128];
+#endif
 
 // IMU fail counter for error handling
 uint32_t imu_fail_counter = 0;
 
-BNO055_Vector_t *_g_lin_accel;
-BNO055_Vector_t *_g_gyro_data;
+BNO055_Vector_t *_g_lin_accel = NULL;
+BNO055_Vector_t *_g_gyro_data = NULL;
 // RTOS synchronization objects
 osMutexId_t dataMutexHandle;
 const osMutexAttr_t dataMutex_attributes = {
@@ -137,7 +140,9 @@ const osEventFlagsAttr_t systemEvents_attributes = {
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_I2C1_Init(void);
+#ifdef DEBUG_ENABLE
 static void MX_USART1_UART_Init(void);
+#endif
 static void MX_USART2_UART_Init(void);
 static void MX_TIM2_Init(void);
 void StartDefaultTask(void *argument);
@@ -146,8 +151,10 @@ void StartSensorTask(void *argument);
 void StartNfcTask(void *argument);
 
 /* USER CODE BEGIN PFP */
-void SystemInit_Modules(void);
+#ifdef DEBUG_ENABLE
 void DebugPrint(const char* format, ...);
+#endif
+void SystemInit_Modules(void);
 void I2C_Scanner(void);
 void DebugDumpHex(const char* label, uint8_t* data, uint8_t len);
 void Modbus_OnRegisterRead(uint16_t addr, uint16_t *value);
@@ -189,7 +196,9 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_I2C1_Init();
+#ifdef DEBUG_ENABLE
   MX_USART1_UART_Init();
+#endif
   MX_USART2_UART_Init();
   MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
@@ -200,11 +209,12 @@ int main(void)
   
   // Initialize Modbus RTU Slave với TIM2 cho frame timeout
   if (Modbus_Init(&hmodbus, &huart2, &htim2, MODBUS_SLAVE_DEFAULT_ADDRESS) == HAL_OK) {
+#ifdef DEBUG_ENABLE
     DebugPrint("Modbus RTU initialized on UART2 with TIM2\r\n");
     DebugPrint("  Slave Address: %d\r\n", MODBUS_SLAVE_DEFAULT_ADDRESS);
     DebugPrint("  Baudrate: 115200\r\n");
     DebugPrint("  Frame timeout: 5ms (T3.5)\r\n");
-    
+#endif
     // Register callbacks
     Modbus_RegisterReadCallback(&hmodbus, Modbus_OnRegisterRead);
     Modbus_RegisterWriteCallback(&hmodbus, Modbus_OnRegisterWrite);
@@ -218,7 +228,9 @@ int main(void)
     Modbus_WriteRegister(&hmodbus, REG_CONFIG_PARITY, 0);   // None
     Modbus_WriteRegister(&hmodbus, REG_CONFIG_STOP_BITS, 1); // 1 stop bit
   } else {
+#ifdef DEBUG_ENABLE
     DebugPrint("Modbus initialization failed!\r\n");
+#endif
   }
   /* USER CODE END 2 */
 
@@ -257,7 +269,9 @@ int main(void)
   /* creation of modbusTask */
   modbusTaskHandle = osThreadNew(StartModbusTask, NULL, &modbusTask_attributes);
   if (modbusTaskHandle == NULL) {
+#ifdef DEBUG_ENABLE
     DebugPrint("Failed to create modbusTask\r\n");
+#endif
   }
   /* USER CODE END RTOS_THREADS */
 
@@ -402,6 +416,7 @@ static void MX_TIM2_Init(void)
 
 }
 
+#ifdef DEBUG_ENABLE
 /**
   * @brief USART1 Initialization Function
   * @param None
@@ -434,6 +449,7 @@ static void MX_USART1_UART_Init(void)
   /* USER CODE END USART1_Init 2 */
 
 }
+#endif
 
 /**
   * @brief USART2 Initialization Function
@@ -532,12 +548,15 @@ void SystemInit_Modules(void)
     I2C_Scanner();
     
     // Initialize BNO055 IMU with retry mechanism
+#ifdef DEBUG_ENABLE
     DebugPrint("Initializing BNO055...\r\n");
-    
+#endif
     BNO055_Status_t bno_status = BNO055_STATUS_ERROR;
     for (int retry = 0; retry < 3 && bno_status != BNO055_STATUS_OK; retry++) {
         if (retry > 0) {
+#ifdef DEBUG_ENABLE
             DebugPrint("BNO055 retry attempt %d/3\r\n", retry + 1);
+#endif
             HAL_Delay(500); // Longer delay for retry
         } else {
             HAL_Delay(100); // Initial startup delay
@@ -547,19 +566,26 @@ void SystemInit_Modules(void)
     }
     
     if (bno_status == BNO055_STATUS_OK) {
+#ifdef DEBUG_ENABLE
         DebugPrint("BNO055 initialized successfully\r\n");
+#endif
         
         // Check BNO055 operational status
         uint8_t imu_status, imu_err;
         if (BNO055_ReadSystemStatus(&hbno055, &imu_status, &imu_err) == BNO055_STATUS_OK) {
+#ifdef DEBUG_ENABLE
             DebugPrint("  IMU Status: 0x%02X, IMU Error: 0x%02X\r\n", imu_status, imu_err);
+#endif
         }
         
         // Check operation mode
+#ifdef DEBUG_ENABLE
         DebugPrint("  Operation Mode: 0x%02X\r\n", hbno055.operation_mode);
+#endif
         
         system_status |= 0x01; // IMU OK
     } else {
+#ifdef DEBUG_ENABLE
         uint8_t error_code = BNO055_GetErrorCode(&hbno055);
         DebugPrint("BNO055 initialization failed after 3 attempts with error: 0x%02X\r\n", error_code);
         if (error_code == 0xFF) {
@@ -569,24 +595,32 @@ void SystemInit_Modules(void)
         } else {
             DebugPrint("  -> Wrong chip ID: 0x%02X (expected 0x%02X)\r\n", error_code, BNO055_ID);
         }
+#endif
         system_error |= 0x01; // IMU Error
         HAL_GPIO_WritePin(LED_FAULT_GPIO_Port, LED_FAULT_Pin, GPIO_PIN_SET);
     }
     
     // Initialize PN532 NFC/RFID with retry mechanism
+#ifdef DEBUG_ENABLE
     DebugPrint("Initializing PN532...\r\n");
+#endif
     
     // Configure PN532
     pn532_config.hi2c = &hi2c1;
     pn532_config.i2c_addr = PN532_I2C_ADDRESS << 1; // HAL expects 8-bit address
     pn532_config.reset_port = NULL; // No reset pin configured
     pn532_config.reset_pin = 0;
+#ifdef DEBUG_ENABLE
     pn532_config.log = DebugPrint; // Use our debug print function
-    
+#else
+    pn532_config.log = NULL;
+#endif
     PN532_Status_t pn532_status = PN532_STATUS_ERROR;
     for (int retry = 0; retry < 3 && pn532_status != PN532_STATUS_OK; retry++) {
         if (retry > 0) {
+#ifdef DEBUG_ENABLE
             DebugPrint("PN532 retry attempt %d/3\r\n", retry + 1);
+#endif
             HAL_Delay(500); // Longer delay for retry
         } else {
             HAL_Delay(100); // Delay between sensor initializations
@@ -596,21 +630,28 @@ void SystemInit_Modules(void)
     }
     
     if (pn532_status == PN532_STATUS_OK) {
+#ifdef DEBUG_ENABLE
         DebugPrint("PN532 initialized successfully\r\n");
+#endif
         system_status |= 0x02; // NFC OK
     } else {
+#ifdef DEBUG_ENABLE
         DebugPrint("PN532 initialization failed\n");
+#endif
     }
     
     
     sensors_initialized = true;
+#ifdef DEBUG_ENABLE
     DebugPrint("Module initialization completed\r\n");
     DebugPrint("System Status: 0x%02X, System Error: 0x%02X\r\n", system_status, system_error);
+#endif
 }
 
 /**
  * @brief Debug print function
  */
+#ifdef DEBUG_ENABLE
 void DebugPrint(const char* format, ...)
 {
     va_list args;
@@ -620,17 +661,17 @@ void DebugPrint(const char* format, ...)
     
     HAL_UART_Transmit(&huart1, (uint8_t*)debug_buffer, strlen(debug_buffer), 100);
 }
-
+#endif
 /**
  * @brief I2C Scanner to detect devices on the bus
  */
 void I2C_Scanner(void)
 {
+#ifdef DEBUG_ENABLE
     uint8_t devices_found = 0;
     DebugPrint("I2C Scanner starting...\r\n");
     DebugPrint("Expected devices: BNO055 (0x%02X), PN532 (0x%02X)\r\n", BNO055_I2C_ADDR, PN532_I2C_ADDRESS);
     DebugPrint("I2C Clock Speed: %lu Hz\r\n", hi2c1.Init.ClockSpeed);
-    
     // Check I2C peripheral state
     DebugPrint("I2C1 State: %d ", hi2c1.State);
     switch(hi2c1.State) {
@@ -647,17 +688,21 @@ void I2C_Scanner(void)
         case HAL_I2C_STATE_ERROR:   DebugPrint("(ERROR)\r\n"); break;
         default: DebugPrint("(UNKNOWN)\r\n"); break;
     }
-    
+#endif
     // Try to reset I2C if it's not in ready state
     if (hi2c1.State != HAL_I2C_STATE_READY) {
+#ifdef DEBUG_ENABLE
         DebugPrint("I2C1 not ready, attempting reset...\r\n");
+#endif
         HAL_I2C_DeInit(&hi2c1);
         HAL_Delay(10);
         MX_I2C1_Init();
         HAL_Delay(50);
+#ifdef DEBUG_ENABLE
         DebugPrint("I2C1 reset completed, new state: %d\r\n", hi2c1.State);
+#endif
     }
-    
+#ifdef DEBUG_ENABLE
     for (uint8_t address = 1; address < 128; address++) {
         // Try to communicate with device at this address
         HAL_StatusTypeDef result = HAL_I2C_IsDeviceReady(&hi2c1, address << 1, 1, 100);
@@ -680,6 +725,7 @@ void I2C_Scanner(void)
             }
         }
     }
+#endif
 }
 
 void Modbus_OnRegisterRead(uint16_t addr, uint16_t *value)
@@ -834,7 +880,6 @@ void Modbus_OnRegisterWrite(uint16_t addr, uint16_t value)
         case REG_DEVICE_ID:
             if (value > 0 && value <= 247) {
                 hmodbus.slave_address = (uint8_t)value;
-                DebugPrint("Modbus slave address changed to: %d\r\n", value);
             }
             break;
 
@@ -850,7 +895,6 @@ void Modbus_OnRegisterWrite(uint16_t addr, uint16_t value)
                     default: new_baudrate = MODBUS_BAUD_115200; break;
                 }
                 if (Modbus_SetConfig(&hmodbus, new_baudrate, hmodbus.parity, hmodbus.stopbits) == HAL_OK) {
-                    DebugPrint("Modbus baudrate changed to: %lu\r\n", new_baudrate);
                 }
             }
             break;
@@ -858,7 +902,6 @@ void Modbus_OnRegisterWrite(uint16_t addr, uint16_t value)
         case REG_CONFIG_PARITY:
             if (value <= 2) {
                 if (Modbus_SetConfig(&hmodbus, hmodbus.baudrate, (Modbus_Parity_t)value, hmodbus.stopbits) == HAL_OK) {
-                    DebugPrint("Modbus parity changed to: %d\r\n", value);
                 }
             }
             break;
@@ -867,7 +910,6 @@ void Modbus_OnRegisterWrite(uint16_t addr, uint16_t value)
             // Thay đổi stop bits
             if (value == 1 || value == 2) {
                 if (Modbus_SetConfig(&hmodbus, hmodbus.baudrate, hmodbus.parity, (Modbus_StopBits_t)value) == HAL_OK) {
-                    DebugPrint("Modbus stop bits changed to: %d\r\n", value);
                 }
             }
             break;
@@ -876,9 +918,8 @@ void Modbus_OnRegisterWrite(uint16_t addr, uint16_t value)
             // Reset error flags
             if (value == 1) {
                 system_error = 0;
-                DebugPrint("System errors reset\r\n");
-                // Tắt LED_FAULT khi reset error
                 HAL_GPIO_WritePin(LED_FAULT_GPIO_Port, LED_FAULT_Pin, GPIO_PIN_RESET);
+                HAL_GPIO_WritePin(RL_FAULT_GPIO_Port, RL_FAULT_Pin, GPIO_PIN_RESET);
             }
             break;
 
@@ -900,7 +941,9 @@ void Modbus_OnRegisterWrite(uint16_t addr, uint16_t value)
 void StartDefaultTask(void *argument)
 {
   /* USER CODE BEGIN 5 */
+#ifdef DEBUG_ENABLE
   DebugPrint("------Default Task Started------\r\n");
+#endif
   
   // Signal that initialization is complete
   osEventFlagsSet(systemEventsHandle, EVENT_SENSOR_DATA_READY);
@@ -924,7 +967,9 @@ void StartDefaultTask(void *argument)
             continue;
         }
 
+#ifdef DEBUG_ENABLE
         DebugPrint("System error detected, attempting recovery...\r\n");
+#endif
         recovery_cooldown = HAL_GetTick();
 
         // Clear error flag
@@ -932,12 +977,16 @@ void StartDefaultTask(void *argument)
 
         // Try to reinitialize modules
         if (system_error & 0x01) {
+#ifdef DEBUG_ENABLE
             DebugPrint("Resetting IMU error flag\r\n");
+#endif
             system_error &= ~0x01;
         }
 
         if (system_error & 0x02) {
+#ifdef DEBUG_ENABLE
             DebugPrint("Resetting NFC error flag\r\n");
+#endif
             system_error &= ~0x02;
         }
     }
@@ -966,7 +1015,9 @@ void StartDefaultTask(void *argument)
 void StartModbusTask(void *argument)
 {
   /* USER CODE BEGIN StartModbusTask */
+#ifdef DEBUG_ENABLE
   DebugPrint("------Modbus Task Started------\r\n");
+#endif
   
   /* Infinite loop */
   for(;;)
@@ -991,7 +1042,9 @@ void StartSensorTask(void *argument)
   // Wait for system initialization
   osEventFlagsWait(systemEventsHandle, EVENT_SENSOR_DATA_READY, osFlagsWaitAny, osWaitForever);
   
+#ifdef DEBUG_ENABLE
   DebugPrint("------Sensor Task Started------\n");
+#endif
   
   uint32_t consecutive_failures = 0;
   const uint32_t MAX_CONSECUTIVE_FAILURES = 5;
@@ -1116,7 +1169,9 @@ void StartSensorTask(void *argument)
           consecutive_failures = 0;
         } else {
         	consecutive_failures++;
+#ifdef DEBUG_ENABLE
         	DebugPrint("IMU read failed! Status: %d, Consecutive failures: %lu\r\n", read_status, consecutive_failures);
+#endif
 
         	// Chỉ báo lỗi hệ thống sau nhiều lần fail liên tiếp
         	if (consecutive_failures >= MAX_CONSECUTIVE_FAILURES) {
@@ -1147,28 +1202,42 @@ void StartSensorTask(void *argument)
 void StartNfcTask(void *argument)
 {
   /* USER CODE BEGIN StartNfcTask */
+#ifdef DEBUG_ENABLE
 	DebugPrint("------NFC Task Starting------\r\n");
+#endif
   // Wait for system initialization with timeout
   osEventFlagsWait(systemEventsHandle, EVENT_SENSOR_DATA_READY, osFlagsWaitAny, 10000);
 
   uint32_t firmware_version = getFirmwareVersion();
   if (firmware_version) {
+#ifdef DEBUG_ENABLE
     DebugPrint("PN532 firmware version: %d\r\n", firmware_version);
+#endif
   } else {
+#ifdef DEBUG_ENABLE
     DebugPrint("Failed to get firmware version\r\n");
+#endif
   }
 
   if (setPassiveActivationRetries(0xFF)) {
+#ifdef DEBUG_ENABLE
     DebugPrint("PN532 passive retries configured\r\n");
+#endif
   } else {
+#ifdef DEBUG_ENABLE
     DebugPrint("Failed to configure passive retries\r\n");
+#endif
   }
 
   // SAMConfig
   if (!SAMConfig()) {
+#ifdef DEBUG_ENABLE
       DebugPrint("PN532 SAMConfig failed\r\n");
+#endif
   } else {
+#ifdef DEBUG_ENABLE
       DebugPrint("PN532 SAMConfig successful\r\n");
+#endif
   }
   /* Infinite loop */
   for(;;)
@@ -1184,13 +1253,14 @@ void StartNfcTask(void *argument)
         
         if (card_detected && uid_length > 0) {
           // Card detected successfully
+#ifdef DEBUG_ENABLE
           DebugPrint("========NFC Card Detected========\r\n");
           DebugPrint("UID: ");
           for (uint8_t i = 0; i < uid_length; i++) {
             DebugPrint("%02X ", uid[i]);
           }
           DebugPrint("\r\n");
-          
+#endif
           // Calculate 32-bit UID for comparison (use first 4 bytes)
           uint32_t current_uid = 0;
           for (uint8_t i = 0; i < uid_length && i < 4; i++) {
@@ -1199,7 +1269,9 @@ void StartNfcTask(void *argument)
           
           // Check if this is a new card
           if (current_uid != nfc_last_card_uid || !nfc_card_present) {
+#ifdef DEBUG_ENABLE
             DebugPrint("New card detected! UID: 0x%08lX\r\n", current_uid);
+#endif
             
             // Update card information
             memcpy(nfc_card_uid, uid, uid_length);
@@ -1210,13 +1282,19 @@ void StartNfcTask(void *argument)
             // Determine card type based on UID length and other characteristics
             if (uid_length == 4) {
               nfc_card_type = 1; // Mifare Classic 1K/4K or compatible
+#ifdef DEBUG_ENABLE
               DebugPrint("Card Type: Mifare Classic (4-byte UID)\r\n");
+#endif
             } else if (uid_length == 7) {
               nfc_card_type = 2; // Mifare Ultralight or 7-byte UID card
+#ifdef DEBUG_ENABLE
               DebugPrint("Card Type: Mifare Ultralight (7-byte UID)\r\n");
+#endif
             } else {
               nfc_card_type = 0; // Unknown
+#ifdef DEBUG_ENABLE
               DebugPrint("Card Type: Unknown (%d-byte UID)\r\n", uid_length);
+#endif
             }            
             // Signal that new NFC data is available
             osEventFlagsSet(systemEventsHandle, EVENT_NFC_DATA_READY);
@@ -1227,7 +1305,9 @@ void StartNfcTask(void *argument)
         } else {
           // No card detected or read error
           if (nfc_card_present) {
+#ifdef DEBUG_ENABLE
             DebugPrint("Card removed\r\n");
+#endif
             
             // Clear card information
             nfc_card_present = false;
@@ -1247,8 +1327,10 @@ void StartNfcTask(void *argument)
       // PN532 not available, provide default data
       static uint32_t pn532_debug_counter = 0;
       if (++pn532_debug_counter >= 50) { // Less frequent for this message
+#ifdef DEBUG_ENABLE
         DebugPrint("PN532 not available - sensors_initialized: %d, system_status: 0x%02X\r\n", 
                    sensors_initialized, system_status);
+#endif
         pn532_debug_counter = 0;
       }
       
