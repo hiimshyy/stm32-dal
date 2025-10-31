@@ -64,23 +64,27 @@ Trạng thái các digital inputs
 | 12 | 0x000C | REG_DI_2 | Digital Input 2 (PA6) | 0 hoặc 1 | R | uint16 |
 | 13 | 0x000D | REG_DI_3 | Digital Input 3 (PA5) | 0 hoặc 1 | R | uint16 |
 | 14 | 0x000E | REG_DI_4 | Digital Input 4 (PA4) | 0 hoặc 1 | R | uint16 |
-| 15 | 0x000F | REG_DI_STATUS | Trạng thái tất cả DI | Bit field | R | uint16 |
-| 16 | 0x0010 | REG_DI_ERROR | Lỗi Digital Input | Bit field | R | uint16 |
+| 15 | 0x000F | REG_DOCK_STATUS | Trạng thái Dock | 0 = `UNDOCKED`, 1 = `PREPARE`, 2 = `DOCKED` | R | uint8_t |
 
 ### Chi tiết:
 
-#### REG_DI_STATUS (0x000F)
-- **Bit 0**: DI_1 state (0 = LOW, 1 = HIGH)
-- **Bit 1**: DI_2 state
-- **Bit 2**: DI_3 state
-- **Bit 3**: DI_4 state
-- **Bit 4-15**: Reserved
+#### REG_DOCK_STATUS (0x000F)
 
-**Ví dụ**:
-- Giá trị = 0b0000000000001111 (15) → Tất cả inputs HIGH
-- Giá trị = 0b0000000000000101 (5) → DI_1 và DI_3 HIGH, DI_2 và DI_4 LOW
+- **Format**: Unsigned 8-bit nằm trong 16-bit register (dùng 8-bit thấp)
+- **Giá trị**:
+  - `0` = `UNDOCKED`: Không ở trên dock, không có tiếp xúc sạc
+  - `1` = `PREPARE`: Đã chạm/đang căn chỉnh, chuẩn bị vào dock ổn định
+  - `2` = `DOCKED`: Đã neo chắc chắn trên dock, trạng thái ổn định
+- **R/W**: R (read-only)
 
----
+Ví dụ đọc nhanh (Python):
+```python
+val = client.read_holding_registers(0x000F, 1, slave=1)
+if not val.isError():
+    s = val.registers[0] & 0xFF
+    mapping = {0: 'UNDOCKED', 1: 'PREPARE', 2: 'DOCKED'}
+    print('Dock status =', mapping.get(s, f'UNKNOWN({s})'))
+```
 
 ## 3. PN532 NFC/RFID Registers (0x0020 - 0x0026)
 Dữ liệu từ module PN532 NFC reader
