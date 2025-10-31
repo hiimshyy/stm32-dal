@@ -25,8 +25,7 @@
  #define REG_DI_2          0x000C  // Digital Input 2
  #define REG_DI_3          0x000D  // Digital Input 3
  #define REG_DI_4          0x000E  // Digital Input 4
- #define REG_DI_STATUS     0x000F  // Digital Input Status
- #define REG_DI_ERROR      0x0010  // Digital Input Error
+ #define REG_DOCK_STATUS   0x000F  // Digital Input Status
  
  //PN532 Registers
  #define REG_PN532_DATA_LOW    0x0020  // PN532 data (low word)

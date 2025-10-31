@@ -65,12 +65,12 @@ const osThreadAttr_t modbusTask_attributes = {
   .priority = (osPriority_t) osPriorityNormal,
 };
 /* Definitions for sensorTask */
-osThreadId_t sensorTaskHandle;
-const osThreadAttr_t sensorTask_attributes = {
-  .name = "sensorTask",
-  .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityNormal,
-};
+//osThreadId_t sensorTaskHandle;
+//const osThreadAttr_t sensorTask_attributes = {
+//  .name = "sensorTask",
+//  .stack_size = 128 * 4,
+//  .priority = (osPriority_t) osPriorityNormal,
+//};
 /* Definitions for nfcTask */
 osThreadId_t nfcTaskHandle;
 const osThreadAttr_t nfcTask_attributes = {
@@ -78,14 +78,21 @@ const osThreadAttr_t nfcTask_attributes = {
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
+/* Definitions for dockTask */
+osThreadId_t dockTaskHandle;
+const osThreadAttr_t dockTask_attributes = {
+  .name = "dockTask",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
 /* USER CODE BEGIN PV */
 // Module handles
 PN532_Config pn532_config;
-BNO055_Handle_t hbno055;
+//BNO055_Handle_t hbno055;
 Modbus_Handle_t hmodbus;
 
 // Data buffers
-uint16_t sensor_data[32];
+//uint16_t sensor_data[32];
 
 // NFC/RFID data
 uint8_t nfc_card_uid[7];
@@ -94,23 +101,26 @@ uint8_t nfc_card_type = 0;
 bool nfc_card_present = false;
 uint32_t nfc_last_card_uid = 0; // For detecting card changes
 
+//docking station status
+uint8_t _g_dock_status = 0;
+
 // Status variables
 volatile uint8_t system_status = 0;
 volatile uint8_t system_error = 0;
 bool sensors_initialized = false;
 
 // IMU velocity and heading data
-float current_velocity = 0.0f;  // m/s
-float current_heading = 0.0f;   // degrees
+//float current_velocity = 0.0f;  // m/s
+//float current_heading = 0.0f;   // degrees
 
 // Debug buffer
 char debug_buffer[128];
 
 // IMU fail counter for error handling
-uint32_t imu_fail_counter = 0;
+//uint32_t imu_fail_counter = 0;
 
-BNO055_Vector_t *_g_lin_accel;
-BNO055_Vector_t *_g_gyro_data;
+//BNO055_Vector_t *_g_lin_accel;
+//BNO055_Vector_t *_g_gyro_data;
 // RTOS synchronization objects
 osMutexId_t dataMutexHandle;
 const osMutexAttr_t dataMutex_attributes = {
@@ -142,8 +152,9 @@ static void MX_USART2_UART_Init(void);
 static void MX_TIM2_Init(void);
 void StartDefaultTask(void *argument);
 void StartModbusTask(void *argument);
-void StartSensorTask(void *argument);
+//void StartSensorTask(void *argument);
 void StartNfcTask(void *argument);
+void StartDockTask(void *argument);
 
 /* USER CODE BEGIN PFP */
 void SystemInit_Modules(void);
@@ -247,18 +258,19 @@ int main(void)
   /* creation of defaultTask */
   defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
 
+  /* creation of modbusTask */
+  modbusTaskHandle = osThreadNew(StartModbusTask, NULL, &modbusTask_attributes);
+
   /* creation of sensorTask */
-  sensorTaskHandle = osThreadNew(StartSensorTask, NULL, &sensorTask_attributes);
+//  sensorTaskHandle = osThreadNew(StartSensorTask, NULL, &sensorTask_attributes);
 
   /* creation of nfcTask */
   nfcTaskHandle = osThreadNew(StartNfcTask, NULL, &nfcTask_attributes);
 
+  /* creation of dockTask */
+  dockTaskHandle = osThreadNew(StartDockTask, NULL, &dockTask_attributes);
+
   /* USER CODE BEGIN RTOS_THREADS */
-  /* creation of modbusTask */
-  modbusTaskHandle = osThreadNew(StartModbusTask, NULL, &modbusTask_attributes);
-  if (modbusTaskHandle == NULL) {
-    DebugPrint("Failed to create modbusTask\r\n");
-  }
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -376,9 +388,9 @@ static void MX_TIM2_Init(void)
 
   /* USER CODE END TIM2_Init 1 */
   htim2.Instance = TIM2;
-  htim2.Init.Prescaler = 15;  // 16MHz / 16 = 1MHz (1us per tick)
+  htim2.Init.Prescaler = 0;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = 5000;  // 5000us = 5ms (T3.5 cho baudrate 115200)
+  htim2.Init.Period = 65535;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
@@ -502,7 +514,7 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pins : IN_4_Pin IN_3_Pin IN_2_Pin IN_1_Pin */
   GPIO_InitStruct.Pin = IN_4_Pin|IN_3_Pin|IN_2_Pin|IN_1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pin : RL_FAULT_Pin */
@@ -531,47 +543,47 @@ void SystemInit_Modules(void)
     // Scan I2C bus for devices
     I2C_Scanner();
     
-    // Initialize BNO055 IMU with retry mechanism
-    DebugPrint("Initializing BNO055...\r\n");
-    
-    BNO055_Status_t bno_status = BNO055_STATUS_ERROR;
-    for (int retry = 0; retry < 3 && bno_status != BNO055_STATUS_OK; retry++) {
-        if (retry > 0) {
-            DebugPrint("BNO055 retry attempt %d/3\r\n", retry + 1);
-            HAL_Delay(500); // Longer delay for retry
-        } else {
-            HAL_Delay(100); // Initial startup delay
-        }
-        
-        bno_status = BNO055_Init(&hbno055, &hi2c1);
-    }
-    
-    if (bno_status == BNO055_STATUS_OK) {
-        DebugPrint("BNO055 initialized successfully\r\n");
-        
-        // Check BNO055 operational status
-        uint8_t imu_status, imu_err;
-        if (BNO055_ReadSystemStatus(&hbno055, &imu_status, &imu_err) == BNO055_STATUS_OK) {
-            DebugPrint("  IMU Status: 0x%02X, IMU Error: 0x%02X\r\n", imu_status, imu_err);
-        }
-        
-        // Check operation mode
-        DebugPrint("  Operation Mode: 0x%02X\r\n", hbno055.operation_mode);
-        
-        system_status |= 0x01; // IMU OK
-    } else {
-        uint8_t error_code = BNO055_GetErrorCode(&hbno055);
-        DebugPrint("BNO055 initialization failed after 3 attempts with error: 0x%02X\r\n", error_code);
-        if (error_code == 0xFF) {
-            DebugPrint("  -> Communication failed - check I2C connections\r\n");
-        } else if (error_code == 0x00) {
-            DebugPrint("  -> Chip ID is 0x00 - sensor may be in reset or wrong address\r\n");
-        } else {
-            DebugPrint("  -> Wrong chip ID: 0x%02X (expected 0x%02X)\r\n", error_code, BNO055_ID);
-        }
-        system_error |= 0x01; // IMU Error
-        HAL_GPIO_WritePin(LED_FAULT_GPIO_Port, LED_FAULT_Pin, GPIO_PIN_SET);
-    }
+//    // Initialize BNO055 IMU with retry mechanism
+//    DebugPrint("Initializing BNO055...\r\n");
+//
+//    BNO055_Status_t bno_status = BNO055_STATUS_ERROR;
+//    for (int retry = 0; retry < 3 && bno_status != BNO055_STATUS_OK; retry++) {
+//        if (retry > 0) {
+//            DebugPrint("BNO055 retry attempt %d/3\r\n", retry + 1);
+//            HAL_Delay(500); // Longer delay for retry
+//        } else {
+//            HAL_Delay(100); // Initial startup delay
+//        }
+//
+//        bno_status = BNO055_Init(&hbno055, &hi2c1);
+//    }
+//
+//    if (bno_status == BNO055_STATUS_OK) {
+//        DebugPrint("BNO055 initialized successfully\r\n");
+//
+//        // Check BNO055 operational status
+//        uint8_t imu_status, imu_err;
+//        if (BNO055_ReadSystemStatus(&hbno055, &imu_status, &imu_err) == BNO055_STATUS_OK) {
+//            DebugPrint("  IMU Status: 0x%02X, IMU Error: 0x%02X\r\n", imu_status, imu_err);
+//        }
+//
+//        // Check operation mode
+//        DebugPrint("  Operation Mode: 0x%02X\r\n", hbno055.operation_mode);
+//
+//        system_status |= 0x01; // IMU OK
+//    } else {
+//        uint8_t error_code = BNO055_GetErrorCode(&hbno055);
+//        DebugPrint("BNO055 initialization failed after 3 attempts with error: 0x%02X\r\n", error_code);
+//        if (error_code == 0xFF) {
+//            DebugPrint("  -> Communication failed - check I2C connections\r\n");
+//        } else if (error_code == 0x00) {
+//            DebugPrint("  -> Chip ID is 0x00 - sensor may be in reset or wrong address\r\n");
+//        } else {
+//            DebugPrint("  -> Wrong chip ID: 0x%02X (expected 0x%02X)\r\n", error_code, BNO055_ID);
+//        }
+//        system_error |= 0x01; // IMU Error
+//        HAL_GPIO_WritePin(LED_FAULT_GPIO_Port, LED_FAULT_Pin, GPIO_PIN_SET);
+//    }
     
     // Initialize PN532 NFC/RFID with retry mechanism
     DebugPrint("Initializing PN532...\r\n");
@@ -600,6 +612,9 @@ void SystemInit_Modules(void)
         system_status |= 0x02; // NFC OK
     } else {
         DebugPrint("PN532 initialization failed\n");
+        system_error |= 0x02; // NFC Error
+        HAL_GPIO_WritePin(LED_FAULT_GPIO_Port, LED_FAULT_Pin, GPIO_PIN_SET);
+        HAL_GPIO_WritePin(RL_FAULT_GPIO_Port, RL_FAULT_Pin, GPIO_PIN_SET);
     }
     
     
@@ -686,42 +701,42 @@ void Modbus_OnRegisterRead(uint16_t addr, uint16_t *value)
 {
     // Cập nhật các thanh ghi từ dữ liệu thực tế
     switch (addr) {
-        case REG_ACCEL_X:
-            *value = (uint16_t)_g_lin_accel->x;
-            break;
-        case REG_ACCEL_Y:
-            *value = (uint16_t)_g_lin_accel->y;
-            break;
-        case REG_ACCEL_Z:
-            *value = (uint16_t)_g_lin_accel->z;
-            break;
-        case REG_GYRO_X:
-            *value = (uint16_t)_g_gyro_data->x;
-            break;
-        case REG_GYRO_Y:
-            *value = (uint16_t)_g_gyro_data->y;
-            break;
-        case REG_GYRO_Z:
-            *value = (uint16_t)_g_gyro_data->z;
-            break;
-
-        case REG_VELOCITY:
-            int16_t velocity_scaled = (int16_t)(current_velocity * 100.0f);
-            *value = (uint16_t)velocity_scaled;
-            break;
-
-        case REG_HEADING:
-            int16_t heading_scaled = (int16_t)(current_heading * 10.0f);
-            *value = (uint16_t)heading_scaled;
-            break;
-
-        case REG_IMU_STATUS:
-            *value = (system_status & 0x01) ? 1 : 0;
-            break;
-
-        case REG_IMU_ERROR:
-            *value = (system_error & 0x01) ? 1 : 0;
-            break;
+//        case REG_ACCEL_X:
+//            *value = (uint16_t)_g_lin_accel->x;
+//            break;
+//        case REG_ACCEL_Y:
+//            *value = (uint16_t)_g_lin_accel->y;
+//            break;
+//        case REG_ACCEL_Z:
+//            *value = (uint16_t)_g_lin_accel->z;
+//            break;
+//        case REG_GYRO_X:
+//            *value = (uint16_t)_g_gyro_data->x;
+//            break;
+//        case REG_GYRO_Y:
+//            *value = (uint16_t)_g_gyro_data->y;
+//            break;
+//        case REG_GYRO_Z:
+//            *value = (uint16_t)_g_gyro_data->z;
+//            break;
+//
+//        case REG_VELOCITY:
+//            int16_t velocity_scaled = (int16_t)(current_velocity * 100.0f);
+//            *value = (uint16_t)velocity_scaled;
+//            break;
+//
+//        case REG_HEADING:
+//            int16_t heading_scaled = (int16_t)(current_heading * 10.0f);
+//            *value = (uint16_t)heading_scaled;
+//            break;
+//
+//        case REG_IMU_STATUS:
+//            *value = (system_status & 0x01) ? 1 : 0;
+//            break;
+//
+//        case REG_IMU_ERROR:
+//            *value = (system_error & 0x01) ? 1 : 0;
+//            break;
 
         // Digital Input Registers
         case REG_DI_1:
@@ -737,11 +752,8 @@ void Modbus_OnRegisterRead(uint16_t addr, uint16_t *value)
             *value = HAL_GPIO_ReadPin(IN_4_GPIO_Port, IN_4_Pin);
             break;
 
-        case REG_DI_STATUS:
-            *value = (HAL_GPIO_ReadPin(IN_1_GPIO_Port, IN_1_Pin) << 0) |
-                     (HAL_GPIO_ReadPin(IN_2_GPIO_Port, IN_2_Pin) << 1) |
-                     (HAL_GPIO_ReadPin(IN_3_GPIO_Port, IN_3_Pin) << 2) |
-                     (HAL_GPIO_ReadPin(IN_4_GPIO_Port, IN_4_Pin) << 3);
+        case REG_DOCK_STATUS:
+            *value = _g_dock_status;
             break;
 
         // PN532 NFC Registers
@@ -988,152 +1000,152 @@ void StartModbusTask(void *argument)
 void StartSensorTask(void *argument)
 {
   /* USER CODE BEGIN StartSensorTask */
-  // Wait for system initialization
-  osEventFlagsWait(systemEventsHandle, EVENT_SENSOR_DATA_READY, osFlagsWaitAny, osWaitForever);
-  
-  DebugPrint("------Sensor Task Started------\n");
-  
-  uint32_t consecutive_failures = 0;
-  const uint32_t MAX_CONSECUTIVE_FAILURES = 5;
-
-  /* Infinite loop */
-  for(;;)
-  {
-    if (sensors_initialized && (system_status & 0x01)) {
-      // BNO055 is available, read real data
-      if (osMutexAcquire(dataMutexHandle, 100) == osOK) {
-        BNO055_Status_t read_status = BNO055_ReadAllSensors(&hbno055);
-        
-        if (read_status == BNO055_STATUS_OK) {
-            // static states
-            static float v = 0.0f;                 // vận tốc (m/s)
-            static float last_a_forward = 0.0f;    // a_{k-1}
-            static float a_forward_lp = 0.0f;      // low-pass state (EMA)
-            static uint32_t last_tick = 0;
-            static MAFilter_t accFilter;
-            static uint8_t zh_counter = 0;
-
-            MAFilter_Init(&accFilter);
-
-//          BNO055_Vector_t *accel = BNO055_GetAccel(&hbno055);
-            _g_lin_accel = BNO055_GetLinearAccel(&hbno055);
-            BNO055_Quaternion_t *quat = BNO055_GetQuaternion(&hbno055);
-            BNO055_Euler_t *euler = BNO055_GetEuler(&hbno055);
-            _g_gyro_data = BNO055_GetGyro(&hbno055);
-
-//          DebugPrint("========IMU Data========\r\n");
-//          DebugPrint("Acceleration: %.2f, %.2f, %.2f\r\n", accel->x * 0.01f, accel->y * 0.01f, accel->z * 0.01f);
-//          DebugPrint("Linear Acceleration: %.2f, %.2f, %.2f m/s*s\r\n", lin_accel->x * 0.01f, lin_accel->y * 0.01f, lin_accel->z * 0.01f);
-//          DebugPrint("Quaternion: %.2f, %.2f, %.2f, %.2f\r\n", quat->w, quat->x, quat->y, quat->z);
-//          DebugPrint("Euler: %.2f, %.2f, %.2f\r\n", euler->heading, euler->roll, euler->pitch);
-//          DebugPrint("Gyro: %.2f, %.2f, %.2f\r\n", gyro->x * 0.01f, gyro->y * 0.01f, gyro->z * 0.01f);
-
-          if (!_g_lin_accel || !quat || !euler || !_g_gyro_data) return;
-
-          uint32_t now = HAL_GetTick();
-          float dt = (last_tick == 0) ? SAMPLE_DT_DEFAULT : (now - last_tick) / 1000.0f;
-          if (dt <= 0) dt = SAMPLE_DT_DEFAULT;
-          last_tick = now;
-
-          // quaternion -> rotation matrix
-          float w = quat->w, x = quat->x, y = quat->y, z = quat->z;
-          float norm = sqrtf(w*w + x*x + y*y + z*z);
-          if (norm < 1e-6f) return;
-          w/=norm; x/=norm; y/=norm; z/=norm;
-
-          float R00 = 1 - 2*y*y - 2*z*z;
-          float R01 = 2*x*y - 2*z*w;
-          float R10 = 2*x*y + 2*z*w;
-          float R11 = 1 - 2*x*x - 2*z*z;
-
-          // scale LSB -> m/s^2 (BNO in m/s2 mode => 1 LSB = 0.01 m/s^2)
-          float ax = _g_lin_accel->x * 0.01f;
-          float ay = _g_lin_accel->z * 0.01f;
-          // world frame (only x,y needed)
-          float ax_w = R00*ax + R01*ay;
-          float ay_w = R10*ax + R11*ay;
-
-          // heading in radians
-          float heading_rad = euler->heading * PI_F / 180.0f;
-
-          // projection onto forward axis (vehicle forward = heading)
-          float a_forward = ax_w * cosf(heading_rad) + ay_w * sinf(heading_rad);
-          float a_forward_filtered = MAFilter_Update(&accFilter, a_forward);
-
-
-          // ----- EMA low-pass for a_forward -----
-          // alpha = dt / (tau + dt), tau = 1/(2*pi*fc)
-          float tau = 1.0f / (2.0f * PI_F * FC_CUTOFF);
-          float alpha = dt / (tau + dt);
-          // initialize lp on first run
-          static bool lp_init = false;
-          if (!lp_init) {
-              a_forward_lp = a_forward_filtered;
-              lp_init = true;
-          } else {
-              a_forward_lp = alpha * a_forward_filtered + (1.0f - alpha) * a_forward_lp;
-          }
-
-          // ----- trapezoidal integration -----
-          float v_delta = 0.5f * (a_forward_lp + last_a_forward) * dt;
-          v += v_delta;
-          last_a_forward = a_forward_lp;
-
-          // ----- ZUPT: nếu gần như đứng yên (acceleration nhỏ và gyro nhỏ) -----
-          // thresholds có thể tinh chỉnh
-          const float ACC_THRESHOLD = 0.05f;   // m/s^2
-          const float GYRO_THRESHOLD = 2.0f;   // deg/s (raw unit from BNO maybe LSB -> cần tùy)
-          // Note: gyro in your code is raw LSB; you may convert to deg/s if needed.
-          if (fabsf(a_forward_lp) < ACC_THRESHOLD &&
-              fabsf(_g_gyro_data->x) < GYRO_THRESHOLD && fabsf(_g_gyro_data->y) < GYRO_THRESHOLD && fabsf(_g_gyro_data ->z) < GYRO_THRESHOLD) {
-              // optionally require this condition persist N cycles before zeroing to avoid flicker
-              zh_counter++;
-              if (zh_counter >= 3) { // 3 cycles stable -> zero velocity
-                  v = 0.0f;
-              }
-          } else {
-              zh_counter = 0;
-          }
-
-          // optional: limit v to reasonable bounds (e.g., -50..+50 m/s)
-          if (v > 50.0f) v = 50.0f;
-          if (v < -50.0f) v = -50.0f;
-          
-          // Cập nhật velocity và heading vào biến global
-          current_velocity = v;
-          current_heading = euler->heading;
-
-          // Debug print
-//          DebugPrint("a_fwd: %.3f (lp %.3f) dt: %.3f => v: %.3f m/s | heading: %.2f\r\n",
-//                    a_forward, a_forward_lp, dt, v, euler->heading);
-//          DebugPrint("v: %.3f m/s | heading: %.2f\r\n", v, euler->heading);
-          
-          // Reset fail counter on success
-          extern uint32_t imu_fail_counter; // Declare extern
-          imu_fail_counter = 0;
-          
-          system_error &= ~0x01; // Clear IMU error
-          consecutive_failures = 0;
-        } else {
-        	consecutive_failures++;
-        	DebugPrint("IMU read failed! Status: %d, Consecutive failures: %lu\r\n", read_status, consecutive_failures);
-
-        	// Chỉ báo lỗi hệ thống sau nhiều lần fail liên tiếp
-        	if (consecutive_failures >= MAX_CONSECUTIVE_FAILURES) {
-			system_error |= 0x01; // Set IMU error
-			HAL_GPIO_WritePin(LED_FAULT_GPIO_Port, LED_FAULT_Pin, GPIO_PIN_SET);
-			osEventFlagsSet(systemEventsHandle, EVENT_SYSTEM_ERROR);
-			consecutive_failures = 0; // Reset counter
-        	}
-        }
-        osMutexRelease(dataMutexHandle);
-      }
-    } else {
-    	osDelay(100);
-    }
-    // Read sensor data every 50ms
-    osDelay(50);
-  }
+//  // Wait for system initialization
+//  osEventFlagsWait(systemEventsHandle, EVENT_SENSOR_DATA_READY, osFlagsWaitAny, osWaitForever);
+//
+//  DebugPrint("------Sensor Task Started------\n");
+//
+//  uint32_t consecutive_failures = 0;
+//  const uint32_t MAX_CONSECUTIVE_FAILURES = 5;
+//
+//  /* Infinite loop */
+//  for(;;)
+//  {
+//    if (sensors_initialized && (system_status & 0x01)) {
+//      // BNO055 is available, read real data
+//      if (osMutexAcquire(dataMutexHandle, 100) == osOK) {
+//        BNO055_Status_t read_status = BNO055_ReadAllSensors(&hbno055);
+//
+//        if (read_status == BNO055_STATUS_OK) {
+//            // static states
+//            static float v = 0.0f;                 // vận tốc (m/s)
+//            static float last_a_forward = 0.0f;    // a_{k-1}
+//            static float a_forward_lp = 0.0f;      // low-pass state (EMA)
+//            static uint32_t last_tick = 0;
+//            static MAFilter_t accFilter;
+//            static uint8_t zh_counter = 0;
+//
+//            MAFilter_Init(&accFilter);
+//
+////          BNO055_Vector_t *accel = BNO055_GetAccel(&hbno055);
+//            _g_lin_accel = BNO055_GetLinearAccel(&hbno055);
+//            BNO055_Quaternion_t *quat = BNO055_GetQuaternion(&hbno055);
+//            BNO055_Euler_t *euler = BNO055_GetEuler(&hbno055);
+//            _g_gyro_data = BNO055_GetGyro(&hbno055);
+//
+////          DebugPrint("========IMU Data========\r\n");
+////          DebugPrint("Acceleration: %.2f, %.2f, %.2f\r\n", accel->x * 0.01f, accel->y * 0.01f, accel->z * 0.01f);
+////          DebugPrint("Linear Acceleration: %.2f, %.2f, %.2f m/s*s\r\n", lin_accel->x * 0.01f, lin_accel->y * 0.01f, lin_accel->z * 0.01f);
+////          DebugPrint("Quaternion: %.2f, %.2f, %.2f, %.2f\r\n", quat->w, quat->x, quat->y, quat->z);
+////          DebugPrint("Euler: %.2f, %.2f, %.2f\r\n", euler->heading, euler->roll, euler->pitch);
+////          DebugPrint("Gyro: %.2f, %.2f, %.2f\r\n", gyro->x * 0.01f, gyro->y * 0.01f, gyro->z * 0.01f);
+//
+//          if (!_g_lin_accel || !quat || !euler || !_g_gyro_data) return;
+//
+//          uint32_t now = HAL_GetTick();
+//          float dt = (last_tick == 0) ? SAMPLE_DT_DEFAULT : (now - last_tick) / 1000.0f;
+//          if (dt <= 0) dt = SAMPLE_DT_DEFAULT;
+//          last_tick = now;
+//
+//          // quaternion -> rotation matrix
+//          float w = quat->w, x = quat->x, y = quat->y, z = quat->z;
+//          float norm = sqrtf(w*w + x*x + y*y + z*z);
+//          if (norm < 1e-6f) return;
+//          w/=norm; x/=norm; y/=norm; z/=norm;
+//
+//          float R00 = 1 - 2*y*y - 2*z*z;
+//          float R01 = 2*x*y - 2*z*w;
+//          float R10 = 2*x*y + 2*z*w;
+//          float R11 = 1 - 2*x*x - 2*z*z;
+//
+//          // scale LSB -> m/s^2 (BNO in m/s2 mode => 1 LSB = 0.01 m/s^2)
+//          float ax = _g_lin_accel->x * 0.01f;
+//          float ay = _g_lin_accel->z * 0.01f;
+//          // world frame (only x,y needed)
+//          float ax_w = R00*ax + R01*ay;
+//          float ay_w = R10*ax + R11*ay;
+//
+//          // heading in radians
+//          float heading_rad = euler->heading * PI_F / 180.0f;
+//
+//          // projection onto forward axis (vehicle forward = heading)
+//          float a_forward = ax_w * cosf(heading_rad) + ay_w * sinf(heading_rad);
+//          float a_forward_filtered = MAFilter_Update(&accFilter, a_forward);
+//
+//
+//          // ----- EMA low-pass for a_forward -----
+//          // alpha = dt / (tau + dt), tau = 1/(2*pi*fc)
+//          float tau = 1.0f / (2.0f * PI_F * FC_CUTOFF);
+//          float alpha = dt / (tau + dt);
+//          // initialize lp on first run
+//          static bool lp_init = false;
+//          if (!lp_init) {
+//              a_forward_lp = a_forward_filtered;
+//              lp_init = true;
+//          } else {
+//              a_forward_lp = alpha * a_forward_filtered + (1.0f - alpha) * a_forward_lp;
+//          }
+//
+//          // ----- trapezoidal integration -----
+//          float v_delta = 0.5f * (a_forward_lp + last_a_forward) * dt;
+//          v += v_delta;
+//          last_a_forward = a_forward_lp;
+//
+//          // ----- ZUPT: nếu gần như đứng yên (acceleration nhỏ và gyro nhỏ) -----
+//          // thresholds có thể tinh chỉnh
+//          const float ACC_THRESHOLD = 0.05f;   // m/s^2
+//          const float GYRO_THRESHOLD = 2.0f;   // deg/s (raw unit from BNO maybe LSB -> cần tùy)
+//          // Note: gyro in your code is raw LSB; you may convert to deg/s if needed.
+//          if (fabsf(a_forward_lp) < ACC_THRESHOLD &&
+//              fabsf(_g_gyro_data->x) < GYRO_THRESHOLD && fabsf(_g_gyro_data->y) < GYRO_THRESHOLD && fabsf(_g_gyro_data ->z) < GYRO_THRESHOLD) {
+//              // optionally require this condition persist N cycles before zeroing to avoid flicker
+//              zh_counter++;
+//              if (zh_counter >= 3) { // 3 cycles stable -> zero velocity
+//                  v = 0.0f;
+//              }
+//          } else {
+//              zh_counter = 0;
+//          }
+//
+//          // optional: limit v to reasonable bounds (e.g., -50..+50 m/s)
+//          if (v > 50.0f) v = 50.0f;
+//          if (v < -50.0f) v = -50.0f;
+//
+//          // Cập nhật velocity và heading vào biến global
+//          current_velocity = v;
+//          current_heading = euler->heading;
+//
+//          // Debug print
+////          DebugPrint("a_fwd: %.3f (lp %.3f) dt: %.3f => v: %.3f m/s | heading: %.2f\r\n",
+////                    a_forward, a_forward_lp, dt, v, euler->heading);
+////          DebugPrint("v: %.3f m/s | heading: %.2f\r\n", v, euler->heading);
+//
+//          // Reset fail counter on success
+//          extern uint32_t imu_fail_counter; // Declare extern
+//          imu_fail_counter = 0;
+//
+//          system_error &= ~0x01; // Clear IMU error
+//          consecutive_failures = 0;
+//        } else {
+//        	consecutive_failures++;
+//        	DebugPrint("IMU read failed! Status: %d, Consecutive failures: %lu\r\n", read_status, consecutive_failures);
+//
+//        	// Chỉ báo lỗi hệ thống sau nhiều lần fail liên tiếp
+//        	if (consecutive_failures >= MAX_CONSECUTIVE_FAILURES) {
+//			system_error |= 0x01; // Set IMU error
+//			HAL_GPIO_WritePin(LED_FAULT_GPIO_Port, LED_FAULT_Pin, GPIO_PIN_SET);
+//			osEventFlagsSet(systemEventsHandle, EVENT_SYSTEM_ERROR);
+//			consecutive_failures = 0; // Reset counter
+//        	}
+//        }
+//        osMutexRelease(dataMutexHandle);
+//      }
+//    } else {
+//    	osDelay(100);
+//    }
+//    // Read sensor data every 50ms
+//    osDelay(50);
+//  }
   /* USER CODE END StartSensorTask */
 }
 
@@ -1267,6 +1279,45 @@ void StartNfcTask(void *argument)
     osDelay(500);
   }
   /* USER CODE END StartNfcTask */
+}
+
+/* USER CODE BEGIN Header_StartDockTask */
+/**
+* @brief Function implementing the nfcTask thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartNfcTask */
+void StartDockTask(void *argument)
+{
+	  /* USER CODE BEGIN StartDockTask */
+  DebugPrint("------Dock Task Started------\r\n");
+
+  /* Infinite loop */
+  for(;;)
+  {
+	bool in_1 = (HAL_GPIO_ReadPin(IN_1_GPIO_Port, IN_1_Pin) == GPIO_PIN_SET);
+	bool in_2 = (HAL_GPIO_ReadPin(IN_2_GPIO_Port, IN_2_Pin) == GPIO_PIN_SET);
+
+	if (in_1 == 1 || in_2 == 1)
+	{
+		DebugPrint("Prepared to dock!");
+		_g_dock_status = DOCK_STATUS_PREPARED;
+	}
+	if (in_1 == 0 && in_2 == 0)
+	{
+		DebugPrint("No docking signal.");
+		_g_dock_status = DOCK_STATUS_UNDOCKED;
+	}
+	if (in_1 == 1 && in_2 == 1)
+	{
+		DebugPrint("Docking successful!");
+		_g_dock_status = DOCK_STATUS_DOCKED;
+	}
+
+	osDelay(200);
+  }
+  /* USER CODE END StartDockTask */
 }
 
 /**

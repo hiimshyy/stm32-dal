@@ -86,7 +86,12 @@ extern TIM_HandleTypeDef htim2;
 #define RL_FAULT_GPIO_Port GPIOA
 
 /* USER CODE BEGIN Private defines */
-
+typedef enum
+{
+	DOCK_STATUS_UNDOCKED = 0,
+	DOCK_STATUS_PREPARED = 1,
+	DOCK_STATUS_DOCKED = 2,
+} Dock_Status_t;
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus
