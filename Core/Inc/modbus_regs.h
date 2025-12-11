@@ -48,7 +48,7 @@
  #define REG_CONFIG_BAUDRATE   0x0101  // Config baudrate (1=9600, 2=19200, 3=38400,...)
  #define REG_CONFIG_PARITY     0x0102  // Config parity (0=None, 1=Even, 2=Odd)
  #define REG_CONFIG_STOP_BITS  0x0103  // Config stop bits (1=1, 2=2)
- #define REG_MODULE_TYPE       0x0104  // Module type (0x0002 = Power Module)
+ #define REG_MODULE_TYPE       0x0104  // Module type (0x0004 = DAL Module)
  #define REG_FIRMWARE_VERSION  0x0105  // Firmware version (e.g. 0x0101 = v1.01)
  #define REG_HARDWARE_VERSION  0x0106  // Hardware version (e.g. 0x0101 = v1.01)
  #define REG_SYSTEM_STATUS     0x0107  // System status (bit field)

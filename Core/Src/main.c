@@ -1299,7 +1299,7 @@ void StartDockTask(void *argument)
 	bool in_1 = (HAL_GPIO_ReadPin(IN_1_GPIO_Port, IN_1_Pin) == GPIO_PIN_SET);
 	bool in_2 = (HAL_GPIO_ReadPin(IN_2_GPIO_Port, IN_2_Pin) == GPIO_PIN_SET);
 
-	if (in_1 == 1 || in_2 == 1)
+	if (in_1 == 1 && in_2 == 0 || in_1 == 0 && in_2 == 1)
 	{
 		DebugPrint("Prepared to dock!");
 		_g_dock_status = DOCK_STATUS_PREPARED;
