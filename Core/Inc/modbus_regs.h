@@ -17,15 +17,15 @@
  #define REG_GYRO_Z        0x0005  // Gyroscope Z-axis data
  #define REG_VELOCITY      0x0006  // Velocity data
  #define REG_HEADING       0x0007  // Heading data
- #define REG_IMU_STATUS    0x0009  // IMU status
- #define REG_IMU_ERROR     0x000A  // IMU error
+ #define REG_IMU_STATUS    0x0008  // IMU status
+ #define REG_IMU_ERROR     0x0009  // IMU error
  
  // Digital Input Registers
- #define REG_DI_1          0x000B  // Digital Input 1
- #define REG_DI_2          0x000C  // Digital Input 2
- #define REG_DI_3          0x000D  // Digital Input 3
- #define REG_DI_4          0x000E  // Digital Input 4
- #define REG_DOCK_STATUS   0x000F  // Digital Input Status
+ #define REG_DI_1          0x000A  // Digital Input 1
+ #define REG_DI_2          0x000B  // Digital Input 2
+ #define REG_DI_3          0x000C  // Digital Input 3
+ #define REG_DI_4          0x000D  // Digital Input 4
+ #define REG_DOCK_STATUS   0x000E  // Digital Input Status
  
  //PN532 Registers
  #define REG_PN532_DATA_LOW    0x0020  // PN532 data (low word)
