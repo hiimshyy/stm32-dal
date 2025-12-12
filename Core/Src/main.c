@@ -1296,26 +1296,21 @@ void StartDockTask(void *argument)
   /* Infinite loop */
   for(;;)
   {
-	bool in_1 = (HAL_GPIO_ReadPin(IN_1_GPIO_Port, IN_1_Pin) == GPIO_PIN_SET);
-	bool in_2 = (HAL_GPIO_ReadPin(IN_2_GPIO_Port, IN_2_Pin) == GPIO_PIN_SET);
+    // Read digital input values from GPIO
+    uint16_t di_1_value = (HAL_GPIO_ReadPin(IN_1_GPIO_Port, IN_1_Pin) == GPIO_PIN_SET) ? 1 : 0;
+    uint16_t di_2_value = (HAL_GPIO_ReadPin(IN_2_GPIO_Port, IN_2_Pin) == GPIO_PIN_SET) ? 1 : 0;
+    // uint16_t di_3_value = HAL_GPIO_ReadPin(IN_3_GPIO_Port, IN_3_Pin);
+    // uint16_t di_4_value = HAL_GPIO_ReadPin(IN_4_GPIO_Port, IN_4_Pin);
 
-	if (in_1 == 1 && in_2 == 0 || in_1 == 0 && in_2 == 1)
-	{
-		DebugPrint("Prepared to dock!");
-		_g_dock_status = DOCK_STATUS_PREPARED;
-	}
-	if (in_1 == 0 && in_2 == 0)
-	{
-		DebugPrint("No docking signal.");
-		_g_dock_status = DOCK_STATUS_UNDOCKED;
-	}
-	if (in_1 == 1 && in_2 == 1)
-	{
-		DebugPrint("Docking successful!");
-		_g_dock_status = DOCK_STATUS_DOCKED;
-	}
+    // Update dock status based on digital input values
+    if ((di_1_value == 1 && di_2_value == 0) || (di_1_value == 0 && di_2_value == 1)) 
+      _g_dock_status = DOCK_STATUS_PREPARED;
+    else if (di_1_value == 1 && di_2_value == 1)
+      _g_dock_status = DOCK_STATUS_UNDOCKED;
+    else if (di_1_value == 0 && di_2_value == 0)
+      _g_dock_status = DOCK_STATUS_DOCKED;
 
-	osDelay(200);
+    osDelay(200);
   }
   /* USER CODE END StartDockTask */
 }

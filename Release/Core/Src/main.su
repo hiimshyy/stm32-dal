@@ -2,7 +2,7 @@
 ../Core/Src/main.c:629:6:DebugPrint	16	static
 ../Core/Src/main.c:700:6:Modbus_OnRegisterRead	8	static
 ../Core/Src/main.c:843:6:Modbus_OnRegisterWrite	8	static
-../Core/Src/main.c:1291:6:StartDockTask	24	static
+../Core/Src/main.c:1291:6:StartDockTask	16	static
 ../Core/Src/main.c:912:6:StartDefaultTask	32	static
 ../Core/Src/main.c:978:6:StartModbusTask	8	static
 ../Core/Src/main.c:1159:6:StartNfcTask	56	static
@@ -11,4 +11,4 @@
 ../Core/Src/main.c:537:6:SystemInit_Modules	24	static
 ../Core/Src/main.c:177:5:main	48	static,ignoring_inline_asm
 ../Core/Src/main.c:1000:6:StartSensorTask	0	static
-../Core/Src/main.c:1327:6:Error_Handler	0	static,ignoring_inline_asm
+../Core/Src/main.c:1322:6:Error_Handler	0	static,ignoring_inline_asm
