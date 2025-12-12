@@ -24,8 +24,8 @@ Dữ liệu từ cảm biến BNO055 IMU
 | 5 | 0x0005 | REG_GYRO_Z | Gyroscope trục Z | LSB | R | uint16 | - |
 | 6 | 0x0006 | REG_VELOCITY | Vận tốc thiết bị | 0.01 m/s | R | int16 | /100 |
 | 7 | 0x0007 | REG_HEADING | Hướng thiết bị | 0.1° | R | uint16 | /10 |
-| 9 | 0x0008 | REG_IMU_STATUS | Trạng thái IMU | Bit field | R | uint16 | - |
-| 10 | 0x0009 | REG_IMU_ERROR | Lỗi IMU | Bit field | R | uint16 | - |
+| 8 | 0x0008 | REG_IMU_STATUS | Trạng thái IMU | Bit field | R | uint16 | - |
+| 9 | 0x0009 | REG_IMU_ERROR | Lỗi IMU | Bit field | R | uint16 | - |
 
 ### Chi tiết:
 
@@ -60,11 +60,11 @@ Trạng thái các digital inputs
 
 | Địa chỉ (Dec) | Địa chỉ (Hex) | Tên | Mô tả | Giá trị | R/W | Kiểu dữ liệu |
 |---------------|---------------|-----|-------|---------|-----|--------------|
-| 11 | 0x000A | REG_DI_1 | Digital Input 1 (PA7) | 0 hoặc 1 | R | uint16 |
-| 12 | 0x000B | REG_DI_2 | Digital Input 2 (PA6) | 0 hoặc 1 | R | uint16 |
-| 13 | 0x000C | REG_DI_3 | Digital Input 3 (PA5) | 0 hoặc 1 | R | uint16 |
-| 14 | 0x000D | REG_DI_4 | Digital Input 4 (PA4) | 0 hoặc 1 | R | uint16 |
-| 15 | 0x000E | REG_DOCK_STATUS | Trạng thái Dock | 0 = `UNDOCKED`, 1 = `PREPARE`, 2 = `DOCKED` | R | uint8_t |
+| 10 | 0x000A | REG_DI_1 | Digital Input 1 (PA7) | 0 hoặc 1 | R | uint16 |
+| 11 | 0x000B | REG_DI_2 | Digital Input 2 (PA6) | 0 hoặc 1 | R | uint16 |
+| 12 | 0x000C | REG_DI_3 | Digital Input 3 (PA5) | 0 hoặc 1 | R | uint16 |
+| 13 | 0x000D | REG_DI_4 | Digital Input 4 (PA4) | 0 hoặc 1 | R | uint16 |
+| 14 | 0x000E | REG_DOCK_STATUS | Trạng thái Dock | 0 = `UNDOCKED`, 1 = `PREPARE`, 2 = `DOCKED` | R | uint8_t |
 
 ### Chi tiết:
 
