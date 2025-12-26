@@ -541,7 +541,7 @@ void SystemInit_Modules(void)
     system_error = 0x00;
     
     // Scan I2C bus for devices
-    I2C_Scanner();
+    // I2C_Scanner();
     
 //    // Initialize BNO055 IMU with retry mechanism
 //    DebugPrint("Initializing BNO055...\r\n");
@@ -586,7 +586,7 @@ void SystemInit_Modules(void)
 //    }
     
     // Initialize PN532 NFC/RFID with retry mechanism
-    DebugPrint("Initializing PN532...\r\n");
+    // DebugPrint("Initializing PN532...\r\n");
     
     // Configure PN532
     pn532_config.hi2c = &hi2c1;
@@ -598,7 +598,7 @@ void SystemInit_Modules(void)
     PN532_Status_t pn532_status = PN532_STATUS_ERROR;
     for (int retry = 0; retry < 3 && pn532_status != PN532_STATUS_OK; retry++) {
         if (retry > 0) {
-            DebugPrint("PN532 retry attempt %d/3\r\n", retry + 1);
+            // DebugPrint("PN532 retry attempt %d/3\r\n", retry + 1);
             HAL_Delay(500); // Longer delay for retry
         } else {
             HAL_Delay(100); // Delay between sensor initializations
@@ -608,10 +608,10 @@ void SystemInit_Modules(void)
     }
     
     if (pn532_status == PN532_STATUS_OK) {
-        DebugPrint("PN532 initialized successfully\r\n");
+        // DebugPrint("PN532 initialized successfully\r\n");
         system_status |= 0x02; // NFC OK
     } else {
-        DebugPrint("PN532 initialization failed\n");
+        // DebugPrint("PN532 initialization failed\n");
         system_error |= 0x02; // NFC Error
         HAL_GPIO_WritePin(LED_FAULT_GPIO_Port, LED_FAULT_Pin, GPIO_PIN_SET);
         HAL_GPIO_WritePin(RL_FAULT_GPIO_Port, RL_FAULT_Pin, GPIO_PIN_SET);
@@ -619,7 +619,7 @@ void SystemInit_Modules(void)
     
     
     sensors_initialized = true;
-    DebugPrint("Module initialization completed\r\n");
+    // DebugPrint("Module initialization completed\r\n");
     DebugPrint("System Status: 0x%02X, System Error: 0x%02X\r\n", system_status, system_error);
 }
 
@@ -1196,12 +1196,12 @@ void StartNfcTask(void *argument)
         
         if (card_detected && uid_length > 0) {
           // Card detected successfully
-          DebugPrint("========NFC Card Detected========\r\n");
+          /*DebugPrint("========NFC Card Detected========\r\n");
           DebugPrint("UID: ");
           for (uint8_t i = 0; i < uid_length; i++) {
             DebugPrint("%02X ", uid[i]);
           }
-          DebugPrint("\r\n");
+          DebugPrint("\r\n");*/
           
           // Calculate 32-bit UID for comparison (use first 4 bytes)
           uint32_t current_uid = 0;
@@ -1211,7 +1211,7 @@ void StartNfcTask(void *argument)
           
           // Check if this is a new card
           if (current_uid != nfc_last_card_uid || !nfc_card_present) {
-            DebugPrint("New card detected! UID: 0x%08lX\r\n", current_uid);
+            // DebugPrint("New card detected! UID: 0x%08lX\r\n", current_uid);
             
             // Update card information
             memcpy(nfc_card_uid, uid, uid_length);
@@ -1222,13 +1222,13 @@ void StartNfcTask(void *argument)
             // Determine card type based on UID length and other characteristics
             if (uid_length == 4) {
               nfc_card_type = 1; // Mifare Classic 1K/4K or compatible
-              DebugPrint("Card Type: Mifare Classic (4-byte UID)\r\n");
+              // DebugPrint("Card Type: Mifare Classic (4-byte UID)\r\n");
             } else if (uid_length == 7) {
               nfc_card_type = 2; // Mifare Ultralight or 7-byte UID card
-              DebugPrint("Card Type: Mifare Ultralight (7-byte UID)\r\n");
+              // DebugPrint("Card Type: Mifare Ultralight (7-byte UID)\r\n");
             } else {
               nfc_card_type = 0; // Unknown
-              DebugPrint("Card Type: Unknown (%d-byte UID)\r\n", uid_length);
+              // DebugPrint("Card Type: Unknown (%d-byte UID)\r\n", uid_length);
             }            
             // Signal that new NFC data is available
             osEventFlagsSet(systemEventsHandle, EVENT_NFC_DATA_READY);
@@ -1238,17 +1238,17 @@ void StartNfcTask(void *argument)
           
         } else {
           // No card detected or read error
-          if (nfc_card_present) {
-            DebugPrint("Card removed\r\n");
+          // if (nfc_card_present) {
+          //   DebugPrint("Card removed\r\n");
             
-            // Clear card information
-            nfc_card_present = false;
-            nfc_card_uid_length = 0;
-            nfc_card_type = 0;
-            nfc_last_card_uid = 0;
-            memset(nfc_card_uid, 0, sizeof(nfc_card_uid));
+          //   // Clear card information
+          //   nfc_card_present = false;
+          //   nfc_card_uid_length = 0;
+          //   nfc_card_type = 0;
+          //   nfc_last_card_uid = 0;
+          //   memset(nfc_card_uid, 0, sizeof(nfc_card_uid));
             
-          }
+          // }
           
           system_error &= ~0x02; // Clear NFC error (no card is not an error)
         }
